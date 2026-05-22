@@ -6,6 +6,8 @@ Use MongoDB for production. This bot stores registered users, tasks, media finge
 
 Do not replace the old MongoDB database if it already contains registered users. Point `MONGO_URI` to the existing database so broadcasts can still target saved users.
 
+If the old bot used PostgreSQL, set the PostgreSQL URL as `LEGACY_DATABASE_URL` and set a new `MONGO_URI` for this bot. The worker imports old users from common PostgreSQL user tables (`users`, `bot_users`, `registered_users`) into MongoDB without deleting old data.
+
 The app never drops collections during startup.
 
 ## 2. Required Config Vars
@@ -18,20 +20,20 @@ ADMIN_ID=...
 MONGO_URI=...
 ```
 
-`ADMIN_ID` may contain multiple comma-separated numeric Telegram user IDs.
+`ADMIN_ID`, `ADMIN_IDS`, `OWNER_ID`, and `OWNER_IDS` may contain comma-separated numeric Telegram user IDs. All configured IDs can manage the bot.
 
-If you prefer `DATABASE_URL`, it must be a `mongodb://` or `mongodb+srv://` URI. Heroku Postgres URLs start with `postgres://` and are not compatible with the MongoDB preservation requirement.
+If you prefer `DATABASE_URL` for the runtime database, it must be a `mongodb://` or `mongodb+srv://` URI. Heroku Postgres URLs start with `postgres://`; keep those as `LEGACY_DATABASE_URL`.
 
-## 3. Optional Userbot Config
+## 3. Userbot Config
 
-Automatic source scanning requires:
+Automatic source scanning requires API ID and API Hash. You can add them from `/admin` -> `Userbot Management`, or set fallback vars:
 
 ```env
 API_ID=...
 API_HASH=...
 ```
 
-Then open `/admin` -> `Userbot Management` and login with phone/code/2FA or paste a Telethon StringSession.
+Then open `/admin` -> `Userbot Management` and login with API ID -> API Hash -> phone -> code -> 2FA if needed, or paste a Telethon StringSession after API credentials are saved.
 
 The session string is stored in MongoDB, not in the repository.
 

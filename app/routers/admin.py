@@ -77,10 +77,11 @@ async def userbot_home(query: CallbackQuery, db: Database, settings: Settings) -
     if await reject_callback_if_not_admin(query, settings):
         return
     await query.answer()
-    doc = await UserbotService(db, settings).session_doc()
+    service = UserbotService(db, settings)
+    doc = await service.session_doc()
     await safe_edit(
         query,
-        text.userbot_home(doc, settings.userbot_enabled),
+        text.userbot_home(doc, await service.has_credentials()),
         keyboards.userbot_keyboard(bool(doc.get("session_string"))),
     )
 
@@ -90,8 +91,8 @@ async def userbot_login(query: CallbackQuery, db: Database, settings: Settings) 
     if await reject_callback_if_not_admin(query, settings):
         return
     await query.answer()
-    await AdminStateStore(db).set(query.from_user.id, "userbot_login")
-    await query.message.answer("Paste the Telethon StringSession for the userbot. Send /cancel to stop.")
+    await AdminStateStore(db).set(query.from_user.id, "userbot_api_id", {"next": "string"})
+    await query.message.answer("Send the Telegram API ID for the userbot account. Send /cancel to stop.")
 
 
 @router.callback_query(F.data == cb("userbot", "phone"))
@@ -99,8 +100,8 @@ async def userbot_phone_login(query: CallbackQuery, db: Database, settings: Sett
     if await reject_callback_if_not_admin(query, settings):
         return
     await query.answer()
-    await AdminStateStore(db).set(query.from_user.id, "userbot_phone")
-    await query.message.answer("Send the userbot phone number in international format. Example: +911234567890")
+    await AdminStateStore(db).set(query.from_user.id, "userbot_api_id", {"next": "phone"})
+    await query.message.answer("Send the Telegram API ID for the userbot account. Send /cancel to stop.")
 
 
 @router.callback_query(F.data == cb("userbot", "logout"))
@@ -110,7 +111,8 @@ async def userbot_logout(query: CallbackQuery, db: Database, settings: Settings)
     await UserbotService(db, settings).logout()
     await query.answer("Userbot logged out")
     doc = await UserbotService(db, settings).session_doc()
-    await safe_edit(query, text.userbot_home(doc, settings.userbot_enabled), keyboards.userbot_keyboard(False))
+    service = UserbotService(db, settings)
+    await safe_edit(query, text.userbot_home(doc, await service.has_credentials()), keyboards.userbot_keyboard(False))
 
 
 @router.callback_query(F.data == TASKS_HOME)
@@ -363,7 +365,7 @@ async def cancel_state(message: Message, db: Database, settings: Settings) -> No
 
 @router.message()
 async def admin_state_message(message: Message, db: Database, bot: Bot, settings: Settings) -> None:
-    if not message.from_user or message.from_user.id not in settings.admin_ids:
+    if not message.from_user or message.from_user.id not in settings.manager_ids:
         return
     state_store = AdminStateStore(db)
     state = await state_store.get(message.from_user.id)
@@ -375,6 +377,10 @@ async def admin_state_message(message: Message, db: Database, bot: Bot, settings
     try:
         if name == "userbot_login":
             await handle_userbot_login(message, db, settings)
+        elif name == "userbot_api_id":
+            clear_state = await handle_userbot_api_id(message, db)
+        elif name == "userbot_api_hash":
+            clear_state = await handle_userbot_api_hash(message, db, settings, payload)
         elif name == "userbot_phone":
             clear_state = await handle_userbot_phone(message, db, settings)
         elif name == "userbot_code":
@@ -412,6 +418,33 @@ async def handle_userbot_login(message: Message, db: Database, settings: Setting
         raise ValueError("session string is too short")
     await UserbotService(db, settings).save_session_string(session_string)
     await message.answer("Userbot session saved.", reply_markup=keyboards.home_back_keyboard())
+
+
+async def handle_userbot_api_id(message: Message, db: Database) -> bool:
+    raw = (message.text or "").strip()
+    if not raw.isdigit():
+        raise ValueError("API ID must be numeric")
+    state = await AdminStateStore(db).get(message.from_user.id)
+    payload = dict((state or {}).get("payload") or {})
+    payload["api_id"] = int(raw)
+    await AdminStateStore(db).set(message.from_user.id, "userbot_api_hash", payload)
+    await message.answer("API ID saved. Now send the API Hash. Send /cancel to stop.")
+    return False
+
+
+async def handle_userbot_api_hash(message: Message, db: Database, settings: Settings, payload: dict[str, Any]) -> bool:
+    api_hash = (message.text or "").strip()
+    if len(api_hash) < 8:
+        raise ValueError("API Hash looks too short")
+    await UserbotService(db, settings).save_credentials(int(payload["api_id"]), api_hash)
+    next_step = payload.get("next") or "phone"
+    if next_step == "string":
+        await AdminStateStore(db).set(message.from_user.id, "userbot_login")
+        await message.answer("API Hash saved. Now paste the Telethon StringSession. Send /cancel to stop.")
+    else:
+        await AdminStateStore(db).set(message.from_user.id, "userbot_phone")
+        await message.answer("API Hash saved. Now send the phone number in international format. Example: +911234567890")
+    return False
 
 
 async def handle_userbot_phone(message: Message, db: Database, settings: Settings) -> bool:

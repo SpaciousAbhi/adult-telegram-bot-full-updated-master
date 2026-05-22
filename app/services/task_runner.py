@@ -85,40 +85,45 @@ class TaskScheduler:
         storage_channel = task.get("storage_channel")
         destinations = [d for d in task.get("destinations", []) if d.get("status", "active") == "active"]
         sources = [s for s in task.get("sources", []) if s.get("status", "active") == "active"]
-        if not storage_channel or not destinations or not sources:
-            await self._finish_task_run(task, interval, "Task needs active sources, destinations, and storage channel")
+        if not storage_channel:
+            await self._finish_task_run(task, interval, "Task needs a storage channel")
             return
 
         userbot = UserbotService(self.db, self.settings)
         client = await userbot.client()
-        if not client:
-            await self._finish_task_run(task, interval, "Userbot is not logged in or not configured")
-            return
+
+        saved = 0
+        updated_sources = list(task.get("sources", []))
+        source_error = None
+        if sources and client:
+            for source in updated_sources:
+                if saved >= self.settings.source_harvest_limit:
+                    break
+                if source.get("status", "active") != "active":
+                    continue
+                count = await self._collect_from_source(
+                    client=client,
+                    task=task,
+                    source=source,
+                    storage_channel=storage_channel,
+                    runtime=runtime,
+                    remaining=self.settings.source_harvest_limit - saved,
+                )
+                saved += count
+        elif sources:
+            source_error = "Userbot is not logged in or not configured"
 
         posted = 0
-        updated_sources = list(task.get("sources", []))
-        for source in updated_sources:
-            if posted >= posts_per_interval:
-                break
-            if source.get("status", "active") != "active":
-                continue
-            count = await self._collect_from_source(
-                client=client,
-                task=task,
-                source=source,
-                storage_channel=storage_channel,
-                destinations=destinations,
-                runtime=runtime,
-                remaining=posts_per_interval - posted,
-            )
-            posted += count
+        if destinations:
+            posted = await self.post_stored_to_destinations(task, destinations, runtime, posts_per_interval)
 
         await self.db.col("tasks").update_one(
             {"_id": task["_id"]},
             {
                 "$set": {
                     "sources": updated_sources,
-                    "last_error": None if posted else "No new non-duplicate videos found",
+                    "last_error": source_error,
+                    "last_saved_count": saved,
                     "last_post_count": posted,
                     "last_run_at": utcnow(),
                     "next_run_at": utcnow() + timedelta(seconds=interval),
@@ -132,7 +137,6 @@ class TaskScheduler:
         task: dict[str, Any],
         source: dict[str, Any],
         storage_channel: int,
-        destinations: list[dict[str, Any]],
         runtime: dict[str, Any],
         remaining: int,
     ) -> int:
@@ -151,50 +155,36 @@ class TaskScheduler:
                 break
             if not message_has_video(message):
                 continue
-            created = await self._store_and_post(
+            created = await self._store_source_message(
                 client=client,
                 message=message,
                 source_raw=raw,
                 task=task,
                 storage_channel=storage_channel,
-                destinations=destinations,
                 runtime=runtime,
             )
             if created:
                 count += 1
+                if self.settings.source_collect_sleep_seconds:
+                    await asyncio.sleep(self.settings.source_collect_sleep_seconds)
         source["last_message_id"] = max_seen
         source["last_checked_at"] = utcnow()
         return count
 
-    async def _store_and_post(
+    async def _store_source_message(
         self,
         client: Any,
         message: Any,
         source_raw: str,
         task: dict[str, Any],
         storage_channel: int,
-        destinations: list[dict[str, Any]],
         runtime: dict[str, Any],
     ) -> bool:
         fingerprint = message_fingerprint(message)
+        if await self.db.col("media").find_one({"fingerprint": fingerprint}, {"_id": 1}):
+            return False
         token = secrets.token_urlsafe(9).replace("-", "").replace("_", "")
         video_info = message_video_info(message)
-        try:
-            forwarded = await client.forward_messages(
-                entity=int(storage_channel),
-                messages=message,
-                from_peer=source_raw,
-                drop_author=not bool(runtime.get("forward_tag_enabled")),
-            )
-        except Exception as exc:
-            await self.db.col("tasks").update_one(
-                {"_id": task["_id"]}, {"$set": {"last_error": f"Storage forward failed: {exc}"}}
-            )
-            return False
-
-        storage_message_id = int(getattr(forwarded, "id", 0) or 0)
-        if not storage_message_id:
-            return False
         media_doc = {
             "task_id": task["_id"],
             "task_name": task.get("name"),
@@ -203,19 +193,72 @@ class TaskScheduler:
             "source": source_raw,
             "source_message_id": int(message.id),
             "storage_chat_id": int(storage_channel),
-            "storage_message_id": storage_message_id,
+            "storage_message_id": None,
             "duration": video_info.get("duration"),
             "size": video_info.get("size"),
+            "storage_status": "reserved",
+            "destination_status": "pending",
+            "posted_destination_chat_ids": [],
             "created_at": utcnow(),
         }
         try:
             await self.db.col("media").insert_one(media_doc)
         except DuplicateKeyError:
             return False
+        try:
+            forwarded = await client.forward_messages(
+                entity=int(storage_channel),
+                messages=message,
+                from_peer=source_raw,
+                drop_author=not bool(runtime.get("forward_tag_enabled")),
+            )
+        except Exception as exc:
+            await self.db.col("media").update_one(
+                {"fingerprint": fingerprint},
+                {"$set": {"storage_status": "failed", "last_error": f"Storage forward failed: {exc}", "updated_at": utcnow()}},
+            )
+            return False
+
+        storage_message_id = int(getattr(forwarded, "id", 0) or 0)
+        if not storage_message_id:
+            await self.db.col("media").update_one(
+                {"fingerprint": fingerprint},
+                {"$set": {"storage_status": "failed", "last_error": "Storage forward returned no message id", "updated_at": utcnow()}},
+            )
+            return False
 
         thumb_bytes = await download_thumbnail_bytes(message)
-        await self._post_destinations(media_doc, destinations, thumb_bytes, runtime)
+        await self.db.col("media").update_one(
+            {"fingerprint": fingerprint},
+            {
+                "$set": {
+                    "storage_message_id": storage_message_id,
+                    "storage_status": "stored",
+                    "thumbnail_bytes": thumb_bytes,
+                    "updated_at": utcnow(),
+                }
+            },
+        )
         return True
+
+    async def post_stored_to_destinations(
+        self,
+        task: dict[str, Any],
+        destinations: list[dict[str, Any]],
+        runtime: dict[str, Any],
+        limit: int,
+    ) -> int:
+        posted = 0
+        cursor = (
+            self.db.col("media")
+            .find({"task_id": task["_id"], "storage_status": "stored", "destination_status": {"$ne": "posted"}})
+            .sort("created_at", 1)
+            .limit(limit)
+        )
+        async for media in cursor:
+            if await self._post_destinations(media, destinations, media.get("thumbnail_bytes"), runtime):
+                posted += 1
+        return posted
 
     async def _post_destinations(
         self,
@@ -223,15 +266,23 @@ class TaskScheduler:
         destinations: list[dict[str, Any]],
         thumb_bytes: bytes | None,
         runtime: dict[str, Any],
-    ) -> None:
+    ) -> bool:
         username = await self.bot_username()
         deep_link = f"https://t.me/{username}?start=get_{media['token']}"
         caption = self.destination_caption(media)
         markup = InlineKeyboardMarkup(
             inline_keyboard=[[InlineKeyboardButton(text="Get This Video", url=deep_link)]]
         )
+        attempted = 0
+        posted_chats = set(media.get("posted_destination_chat_ids") or [])
         for destination in destinations:
             chat_id = int(destination["chat_id"])
+            if chat_id in posted_chats:
+                continue
+            existing = await self.db.col("destination_posts").find_one({"media_token": media["token"], "chat_id": chat_id})
+            if existing and existing.get("message_id"):
+                posted_chats.add(chat_id)
+                continue
             try:
                 if thumb_bytes:
                     sent = await self.bot.send_photo(
@@ -244,24 +295,35 @@ class TaskScheduler:
                 else:
                     sent = await self.bot.send_message(chat_id=chat_id, text=caption, reply_markup=markup)
             except (TelegramBadRequest, TelegramForbiddenError) as exc:
-                await self.db.col("destination_posts").insert_one(
-                    {
-                        "media_token": media["token"],
-                        "chat_id": chat_id,
-                        "error": str(exc),
-                        "created_at": utcnow(),
-                    }
+                await self.db.col("destination_posts").update_one(
+                    {"media_token": media["token"], "chat_id": chat_id},
+                    {"$set": {"error": str(exc), "updated_at": utcnow()}, "$setOnInsert": {"created_at": utcnow()}},
+                    upsert=True,
                 )
                 continue
-            await self.db.col("destination_posts").insert_one(
+            await self.db.col("destination_posts").update_one(
+                {"media_token": media["token"], "chat_id": chat_id},
                 {
-                    "media_token": media["token"],
-                    "chat_id": chat_id,
-                    "message_id": sent.message_id,
-                    "created_at": utcnow(),
-                }
+                    "$set": {"message_id": sent.message_id, "error": None, "updated_at": utcnow()},
+                    "$setOnInsert": {"created_at": utcnow()},
+                },
+                upsert=True,
             )
+            attempted += 1
+            posted_chats.add(chat_id)
             await self._schedule_destination_delete(runtime, chat_id, sent.message_id)
+        destination_status = "posted" if all(int(d["chat_id"]) in posted_chats for d in destinations) else "partial"
+        await self.db.col("media").update_one(
+            {"_id": media["_id"]},
+            {
+                "$set": {
+                    "destination_status": destination_status,
+                    "posted_destination_chat_ids": list(posted_chats),
+                    "destination_posted_at": utcnow() if destination_status == "posted" else media.get("destination_posted_at"),
+                }
+            },
+        )
+        return attempted > 0
 
     def destination_caption(self, media: dict[str, Any]) -> str:
         duration = human_seconds(media.get("duration"))
@@ -317,4 +379,3 @@ class TaskScheduler:
             except (TelegramBadRequest, TelegramForbiddenError) as exc:
                 update = {"done": True, "error": str(exc), "deleted_at": utcnow()}
             await self.db.col("messages_to_delete").update_one({"_id": item["_id"]}, {"$set": update})
-

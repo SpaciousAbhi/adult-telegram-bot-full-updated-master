@@ -50,7 +50,7 @@ def home_back_keyboard() -> InlineKeyboardMarkup:
 
 def userbot_keyboard(logged_in: bool) -> InlineKeyboardMarkup:
     rows = [
-        [btn("Login With Phone Code", cb("userbot", "phone"))],
+        [btn("Userbot Login", cb("userbot", "phone"))],
         [btn("Login With StringSession", cb("userbot", "login"))],
         [btn("Check Status", cb("userbot", "home"))],
     ]

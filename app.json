@@ -8,19 +8,23 @@
       "required": true
     },
     "ADMIN_ID": {
-      "description": "Telegram numeric admin ID. Multiple IDs may be comma-separated.",
+      "description": "Telegram numeric admin ID. Multiple IDs may be comma-separated. ADMIN_IDS, OWNER_ID, and OWNER_IDS are also supported.",
       "required": true
     },
     "MONGO_URI": {
-      "description": "MongoDB connection URI. DATABASE_URL is also accepted only when it contains a mongodb:// or mongodb+srv:// URI.",
+      "description": "MongoDB runtime connection URI. DATABASE_URL is also accepted only when it contains a mongodb:// or mongodb+srv:// URI.",
       "required": true
     },
+    "LEGACY_DATABASE_URL": {
+      "description": "Optional old PostgreSQL URL used only to import registered users into MongoDB for broadcasts.",
+      "required": false
+    },
     "API_ID": {
-      "description": "Optional Telegram API ID for userbot source collection.",
+      "description": "Optional fallback Telegram API ID. It can also be entered from /admin Userbot Management.",
       "required": false
     },
     "API_HASH": {
-      "description": "Optional Telegram API hash for userbot source collection.",
+      "description": "Optional fallback Telegram API hash. It can also be entered from /admin Userbot Management.",
       "required": false
     }
   },
@@ -36,4 +40,3 @@
     }
   ]
 }
-

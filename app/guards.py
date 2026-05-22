@@ -6,7 +6,7 @@ from app.config import Settings
 
 
 def is_admin_id(user_id: int | None, settings: Settings) -> bool:
-    return user_id is not None and int(user_id) in settings.admin_ids
+    return user_id is not None and int(user_id) in settings.manager_ids
 
 
 async def reject_message_if_not_admin(message: Message, settings: Settings) -> bool:
@@ -21,4 +21,3 @@ async def reject_callback_if_not_admin(query: CallbackQuery, settings: Settings)
         return False
     await query.answer("Admin access only.", show_alert=True)
     return True
-

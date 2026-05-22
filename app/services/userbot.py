@@ -33,6 +33,36 @@ class UserbotService:
         doc = await self.session_doc()
         return bool(doc.get("session_string"))
 
+    async def credentials(self) -> tuple[int | None, str | None]:
+        doc = await self.session_doc()
+        api_id = doc.get("api_id") or self.settings.api_id
+        api_hash = doc.get("api_hash") or self.settings.api_hash
+        return int(api_id) if api_id else None, api_hash
+
+    async def has_credentials(self) -> bool:
+        api_id, api_hash = await self.credentials()
+        return api_id is not None and bool(api_hash)
+
+    async def require_credentials(self) -> tuple[int, str]:
+        api_id, api_hash = await self.credentials()
+        if api_id is None or not api_hash:
+            raise ConfigError("API ID and API Hash are required. Use Userbot Management to add them step by step.")
+        return api_id, api_hash
+
+    async def save_credentials(self, api_id: int, api_hash: str) -> None:
+        await self.db.col("userbot").update_one(
+            {"_id": "default"},
+            {
+                "$set": {
+                    "api_id": int(api_id),
+                    "api_hash": api_hash.strip(),
+                    "updated_at": utcnow(),
+                    "last_error": None,
+                }
+            },
+            upsert=True,
+        )
+
     async def save_session_string(self, session_string: str, phone: str | None = None) -> None:
         await self.db.col("userbot").update_one(
             {"_id": "default"},
@@ -50,8 +80,8 @@ class UserbotService:
     async def start_phone_login(self, phone: str) -> dict[str, str]:
         if TelegramClient is None or StringSession is None:
             raise ConfigError("Telethon is not installed")
-        self.settings.require_userbot_credentials()
-        client = TelegramClient(StringSession(), self.settings.api_id, self.settings.api_hash)
+        api_id, api_hash = await self.require_credentials()
+        client = TelegramClient(StringSession(), api_id, api_hash)
         await client.connect()
         try:
             sent = await client.send_code_request(phone)
@@ -66,8 +96,8 @@ class UserbotService:
     async def complete_phone_code(self, phone: str, code: str, phone_code_hash: str, session_string: str) -> bool:
         if TelegramClient is None or StringSession is None:
             raise ConfigError("Telethon is not installed")
-        self.settings.require_userbot_credentials()
-        client = TelegramClient(StringSession(session_string), self.settings.api_id, self.settings.api_hash)
+        api_id, api_hash = await self.require_credentials()
+        client = TelegramClient(StringSession(session_string), api_id, api_hash)
         await client.connect()
         try:
             try:
@@ -97,13 +127,13 @@ class UserbotService:
     async def complete_password(self, password: str) -> None:
         if TelegramClient is None or StringSession is None:
             raise ConfigError("Telethon is not installed")
-        self.settings.require_userbot_credentials()
+        api_id, api_hash = await self.require_credentials()
         doc = await self.session_doc()
         temp = doc.get("login_temp") or {}
         session_string = temp.get("session_string")
         if not session_string:
             raise ConfigError("No pending 2FA login is saved")
-        client = TelegramClient(StringSession(session_string), self.settings.api_id, self.settings.api_hash)
+        client = TelegramClient(StringSession(session_string), api_id, api_hash)
         await client.connect()
         try:
             await client.sign_in(password=password)
@@ -128,7 +158,11 @@ class UserbotService:
         if TelegramClient is None or StringSession is None:
             await self._set_error("Telethon is not installed")
             return None
-        self.settings.require_userbot_credentials()
+        try:
+            api_id, api_hash = await self.require_credentials()
+        except ConfigError as exc:
+            await self._set_error(str(exc))
+            return None
         doc = await self.session_doc()
         session_string = doc.get("session_string")
         if not session_string:
@@ -137,7 +171,7 @@ class UserbotService:
         if self._client and self._client.is_connected():
             return self._client
         try:
-            client = TelegramClient(StringSession(session_string), self.settings.api_id, self.settings.api_hash)
+            client = TelegramClient(StringSession(session_string), api_id, api_hash)
             await client.connect()
             if not await client.is_user_authorized():
                 await self._set_error("Saved userbot session is not authorized")
@@ -169,7 +203,8 @@ def message_fingerprint(message: Any) -> str:
     document = getattr(message, "document", None)
     if document and getattr(document, "id", None):
         size = getattr(document, "size", 0) or 0
-        return f"tgdoc:{document.id}:{size}"
+        unique_id = getattr(document, "file_unique_id", None) or getattr(document, "id", None)
+        return f"tgdoc:{unique_id}:{size}"
     chat_id = getattr(getattr(message, "peer_id", None), "channel_id", None) or getattr(message, "chat_id", "")
     return f"msg:{chat_id}:{message.id}"
 

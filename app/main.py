@@ -11,6 +11,7 @@ from app.config import ConfigError, get_settings
 from app.database import Database, MongoStartupError
 from app.middleware import AppContextMiddleware
 from app.routers import register_routers
+from app.services.legacy_postgres import import_legacy_postgres_users
 from app.services.task_runner import TaskScheduler
 
 
@@ -34,6 +35,7 @@ async def main() -> None:
     except MongoStartupError as exc:
         logger.error("%s", exc)
         raise SystemExit(1) from exc
+    await import_legacy_postgres_users(db, settings.legacy_database_url)
 
     bot = Bot(
         token=settings.bot_token,

@@ -28,7 +28,11 @@ def admin_home(stats: dict[str, Any], runtime: dict[str, Any]) -> str:
 
 def user_home(destinations: list[dict[str, Any]]) -> str:
     if not destinations:
-        return "Access ready.\n\nNo public destination channels are configured yet."
+        return (
+            "Welcome.\n\n"
+            "Your access is ready. No destination channels are configured yet, "
+            "so videos are not available from the public channel list right now."
+        )
     lines = ["Access ready.", "", "Free destination channels:"]
     for item in destinations[:20]:
         title = item.get("title") or str(item.get("chat_id"))
@@ -52,7 +56,7 @@ def userbot_home(doc: dict[str, Any], configured: bool) -> str:
         f"Logged in: {yes_no(logged)}\n"
         f"Phone: {doc.get('phone') or 'not saved'}\n"
         f"Last error: {doc.get('last_error') or 'none'}\n\n"
-        "Paste a Telethon StringSession to login. API_ID and API_HASH must be set in Heroku vars."
+        "Login flow: API ID -> API Hash -> phone -> code -> 2FA if needed."
     )
 
 

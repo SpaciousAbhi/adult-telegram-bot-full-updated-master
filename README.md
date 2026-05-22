@@ -34,17 +34,19 @@ MONGO_URI=mongodb+srv://user:password@cluster.mongodb.net/adult_telegram_bot
 Aliases accepted:
 
 - `BOT_TOKEN`, `TELEGRAM_BOT_TOKEN`, or `TOKEN`
-- `ADMIN_ID`, `OWNER_ID`, or `BOT_OWNER_ID`
+- `ADMIN_ID`, `ADMIN_IDS`, `OWNER_ID`, `OWNER_IDS`, `BOT_OWNER_ID`, or `BOT_OWNER_IDS`
 - `MONGO_URI`, `MONGODB_URI`, `MONGO_URL`, `MONGODB_URL`, `MONGO_DB_URI`, `MONGO_DB_URL`, or `DATABASE_URL`
 
-`DATABASE_URL` is accepted only when it contains a MongoDB URI. A PostgreSQL URL will not preserve old MongoDB users and the bot will stop with a clear config error.
+`DATABASE_URL` is accepted as the runtime database only when it contains a MongoDB URI. If the old bot used PostgreSQL, keep that URL as `LEGACY_DATABASE_URL` and set `MONGO_URI` for the new runtime. On startup, the bot imports old registered users from common PostgreSQL user tables into MongoDB for broadcasting.
 
-Optional userbot vars:
+Optional userbot fallback vars:
 
 ```env
 API_ID=12345
 API_HASH=abcdef123456
 ```
+
+You can also add API ID and API Hash from `/admin` -> `Userbot Management`; the login flow asks for API ID, API Hash, phone, login code, and 2FA password when needed.
 
 ## Heroku Deploy
 
@@ -83,7 +85,7 @@ The panel includes:
 
 Users start with `/start`.
 
-If force subscription is enabled, the bot only shows unfinished channels. After `Verify Access`, the bot resumes the interrupted action. If the user came through a `Get This Video` button, the bot checks the daily limit and then forwards or copies the stored video from the storage channel.
+If force subscription is enabled, the bot only shows unfinished channels. If no force-subscription channels are configured, `/start` continues normally and always sends a fallback message. After `Verify Access`, the bot resumes the interrupted action. If the user came through a `Get This Video` button, the bot checks the daily limit and then forwards or copies the stored video from the storage channel.
 
 ## Local Validation
 
@@ -93,4 +95,3 @@ python -m unittest discover -s tests
 ```
 
 Live Telegram behavior requires real Telegram credentials, reachable MongoDB, bot admin permissions, and valid channel IDs.
-
