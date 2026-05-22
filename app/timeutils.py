@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta, timezone
+
+
+IST = timezone(timedelta(hours=5, minutes=30), name="IST")
 
 
 def utcnow() -> datetime:
@@ -31,5 +34,12 @@ def compact_dt(value: datetime | None) -> str:
         return "never"
     if value.tzinfo is None:
         value = value.replace(tzinfo=UTC)
-    return value.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
+    return value.astimezone(IST).strftime("%Y-%m-%d %H:%M IST")
 
+
+def compact_dt_utc(value: datetime | None) -> str:
+    if not value:
+        return "never"
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")

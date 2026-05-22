@@ -67,6 +67,17 @@ For each task:
 
 Each task runs independently. Pausing a task stops posting only for that task.
 
+Task times shown in the admin panel and scheduler logs use Indian Standard Time.
+
+Source-to-storage collection is separate from storage-to-destination posting:
+
+- source collection repeats using `SOURCE_COLLECT_INTERVAL_SECONDS`
+- each source scan saves up to `SOURCE_HARVEST_LIMIT` new non-duplicate videos
+- task interval controls when stored videos are posted to destination channels
+- posts per interval controls how many stored videos are posted per destination cycle
+
+The worker logs task found, status, current time, next run, next source scan, due state, skip reason, source scan result, storage save result, duplicate skips, and destination post result.
+
 ## 6. Force Subscription
 
 Open `/admin` -> `Advanced Force Subscription`.

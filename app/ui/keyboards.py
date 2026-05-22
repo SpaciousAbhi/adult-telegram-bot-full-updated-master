@@ -76,6 +76,7 @@ def task_detail_keyboard(task: dict[str, Any]) -> InlineKeyboardMarkup:
         [btn("Manage Sources", cb("task", "srcs", task_id)), btn("Manage Destinations", cb("task", "dsts", task_id))],
         [btn("Set Storage Channel", cb("task", "storage", task_id)), btn("Remove Storage", cb("task", "clearstorage", task_id))],
         [btn("Set Interval", cb("task", "interval", task_id)), btn("Set Amount", cb("task", "amount", task_id))],
+        [btn("Run Now", cb("task", "runnow", task_id))],
     ]
     if status == "active":
         rows.append([btn("Pause Task", cb("task", "pause", task_id)), btn("Stop Task", cb("task", "stop", task_id))])
@@ -85,6 +86,27 @@ def task_detail_keyboard(task: dict[str, Any]) -> InlineKeyboardMarkup:
         rows.append([btn("Start Task", cb("task", "resume", task_id)), btn("Stop Task", cb("task", "stop", task_id))])
     rows.extend([[btn("Refresh", cb("task", "open", task_id))], [btn("Back", TASKS_HOME)]])
     return mk(rows)
+
+
+def task_interval_keyboard(task_id: str) -> InlineKeyboardMarkup:
+    return mk(
+        [
+            [btn("1 minute", cb("task", "setint", task_id, 60)), btn("5 minutes", cb("task", "setint", task_id, 300))],
+            [btn("10 minutes", cb("task", "setint", task_id, 600)), btn("20 minutes", cb("task", "setint", task_id, 1200))],
+            [btn("30 minutes", cb("task", "setint", task_id, 1800)), btn("1 hour", cb("task", "setint", task_id, 3600))],
+            [btn("Back", cb("task", "open", task_id))],
+        ]
+    )
+
+
+def task_amount_keyboard(task_id: str) -> InlineKeyboardMarkup:
+    return mk(
+        [
+            [btn("1 post", cb("task", "setamt", task_id, 1)), btn("2 posts", cb("task", "setamt", task_id, 2))],
+            [btn("10 posts", cb("task", "setamt", task_id, 10)), btn("50 posts", cb("task", "setamt", task_id, 50))],
+            [btn("Back", cb("task", "open", task_id))],
+        ]
+    )
 
 
 def task_sources_keyboard(task: dict[str, Any]) -> InlineKeyboardMarkup:

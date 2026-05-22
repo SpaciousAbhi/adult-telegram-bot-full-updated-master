@@ -14,6 +14,14 @@ from app.services.referrals import ReferralService
 from app.timeutils import utcnow
 
 
+def chat_ref(value: Any) -> int | str:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.lstrip("-").isdigit():
+        return int(value)
+    return str(value)
+
+
 class DeliveryService:
     def __init__(self, db: Database, bot: Bot, settings: Settings | None = None) -> None:
         self.db = db
@@ -44,13 +52,13 @@ class DeliveryService:
             if runtime.get("forward_tag_enabled"):
                 sent = await self.bot.forward_message(
                     chat_id=chat_id,
-                    from_chat_id=int(storage_chat_id),
+                    from_chat_id=chat_ref(storage_chat_id),
                     message_id=int(storage_message_id),
                 )
             else:
                 sent = await self.bot.copy_message(
                     chat_id=chat_id,
-                    from_chat_id=int(storage_chat_id),
+                    from_chat_id=chat_ref(storage_chat_id),
                     message_id=int(storage_message_id),
                 )
         except (TelegramBadRequest, TelegramForbiddenError):

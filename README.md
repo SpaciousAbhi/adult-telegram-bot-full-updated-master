@@ -4,6 +4,7 @@ Heroku-ready Telegram bot for admin-controlled adult content delivery workflows:
 
 - admin dashboard with inline buttons
 - task-based source to storage to destination posting
+- independent source harvesting and interval-based destination posting
 - duplicate video blocking through stored media fingerprints
 - per-task interval and posts-per-interval controls
 - per-task sources, destinations, and storage channel
@@ -86,6 +87,12 @@ The panel includes:
 Users start with `/start`.
 
 If force subscription is enabled, the bot only shows unfinished channels. If no force-subscription channels are configured, `/start` continues normally and always sends a fallback message. After `Verify Access`, the bot resumes the interrupted action. If the user came through a `Get This Video` button, the bot checks the daily limit and then forwards or copies the stored video from the storage channel.
+
+## Posting Scheduler
+
+The worker logs every scheduler tick, task due check, source scan, storage save, duplicate skip, destination post, and skip reason. Admin task times are displayed in Indian Standard Time.
+
+Source-to-storage collection runs independently through `SOURCE_COLLECT_INTERVAL_SECONDS` and `SOURCE_HARVEST_LIMIT`. Storage-to-destination posting is controlled by the task interval and posts-per-interval amount.
 
 ## Local Validation
 

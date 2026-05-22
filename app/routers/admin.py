@@ -27,6 +27,7 @@ from app.database import Database
 from app.guards import reject_callback_if_not_admin, reject_message_if_not_admin
 from app.services.force_subscription import ForceSubscriptionService
 from app.services.state import AdminStateStore
+from app.services.task_runner import TaskScheduler
 from app.services.userbot import UserbotService
 from app.timeutils import utcnow
 from app.ui import keyboards, text
@@ -134,7 +135,12 @@ async def task_new(query: CallbackQuery, db: Database, settings: Settings) -> No
 
 
 @router.callback_query(F.data.startswith("task:"))
-async def task_callbacks(query: CallbackQuery, db: Database, settings: Settings) -> None:
+async def task_callbacks(
+    query: CallbackQuery,
+    db: Database,
+    settings: Settings,
+    scheduler: TaskScheduler | None = None,
+) -> None:
     if await reject_callback_if_not_admin(query, settings):
         return
     parts = split_cb(query.data)
@@ -162,14 +168,59 @@ async def task_callbacks(query: CallbackQuery, db: Database, settings: Settings)
     if action in {"addsrc", "adddst", "storage", "interval", "amount"} and len(parts) >= 3:
         prompts = {
             "addsrc": "Send source numeric ID, @username, or t.me link. You can also forward a message from the source.",
-            "adddst": "Send destination as: chat_id | title | public_link. Numeric chat_id is required for posting.",
-            "storage": "Send the storage channel numeric ID. The bot/userbot must have access there.",
-            "interval": "Send interval like 1m, 5m, 30m, 1h, or a number of seconds.",
-            "amount": "Send how many videos to post per interval.",
+            "adddst": "Send destination as chat_id | title | public_link, or forward a message from the destination channel.",
+            "storage": "Send the storage channel numeric ID or forward a message from the storage channel.",
+            "interval": "Choose a preset below, or send a custom interval like 1 minute, 5m, 30m, 1 hour, or seconds.",
+            "amount": "Choose a preset below, or send a custom number of posts per interval.",
         }
         await query.answer()
         await AdminStateStore(db).set(query.from_user.id, f"task_{action}", {"task_id": parts[2]})
-        await query.message.answer(prompts[action] + " Send /cancel to stop.")
+        if action == "interval":
+            await query.message.answer(
+                prompts[action] + " Send /cancel to stop.",
+                reply_markup=keyboards.task_interval_keyboard(parts[2]),
+            )
+        elif action == "amount":
+            await query.message.answer(
+                prompts[action] + " Send /cancel to stop.",
+                reply_markup=keyboards.task_amount_keyboard(parts[2]),
+            )
+        else:
+            await query.message.answer(prompts[action] + " Send /cancel to stop.")
+        return
+    if action == "setint" and len(parts) >= 4:
+        seconds = int(parts[3])
+        await db.col("tasks").update_one(
+            {"_id": ObjectId(parts[2])},
+            {"$set": {"interval_seconds": seconds, "next_run_at": utcnow() + timedelta(seconds=seconds), "updated_at": utcnow()}},
+        )
+        await query.answer("Interval saved")
+        await AdminStateStore(db).clear(query.from_user.id)
+        await show_task(query, db, parts[2])
+        return
+    if action == "setamt" and len(parts) >= 4:
+        amount = int(parts[3])
+        await db.col("tasks").update_one(
+            {"_id": ObjectId(parts[2])},
+            {"$set": {"posts_per_interval": amount, "updated_at": utcnow()}},
+        )
+        await query.answer("Post amount saved")
+        await AdminStateStore(db).clear(query.from_user.id)
+        await show_task(query, db, parts[2])
+        return
+    if action == "runnow" and len(parts) >= 3:
+        task = await db.col("tasks").find_one({"_id": ObjectId(parts[2])})
+        if not task:
+            await query.answer("Task not found", show_alert=True)
+            return
+        await query.answer("Running task now...")
+        if scheduler:
+            await scheduler.run_task(task, force=True)
+        else:
+            await db.col("tasks").update_one(
+                {"_id": task["_id"]}, {"$set": {"next_run_at": utcnow(), "updated_at": utcnow()}}
+            )
+        await show_task(query, db, parts[2])
         return
     if action == "clearstorage" and len(parts) >= 3:
         await db.col("tasks").update_one(
@@ -523,8 +574,8 @@ async def handle_task_update(message: Message, db: Database, name: str, payload:
         await db.col("tasks").update_one({"_id": task_id}, {"$set": {"sources": sources, "updated_at": utcnow()}})
         await message.answer("Source updated.")
     elif name == "task_adddst":
-        value, title, link = parse_channel_like_input(message, require_numeric=True)
-        destination = {"chat_id": int(value), "title": title or str(value), "link": link, "status": "active", "added_at": utcnow()}
+        value, title, link = parse_channel_like_input(message, require_numeric=False)
+        destination = {"chat_id": value, "title": title or str(value), "link": link, "status": "active", "added_at": utcnow()}
         await db.col("tasks").update_one(
             {"_id": task_id},
             {"$push": {"destinations": destination}, "$set": {"updated_at": utcnow()}},
@@ -536,23 +587,24 @@ async def handle_task_update(message: Message, db: Database, name: str, payload:
         destinations = list(task.get("destinations", []))
         if index < 0 or index >= len(destinations):
             raise ValueError("destination not found")
-        value, title, link = parse_channel_like_input(message, require_numeric=True)
-        destinations[index].update({"chat_id": int(value), "title": title or str(value), "link": link, "updated_at": utcnow()})
+        value, title, link = parse_channel_like_input(message, require_numeric=False)
+        destinations[index].update({"chat_id": value, "title": title or str(value), "link": link, "updated_at": utcnow()})
         await db.col("tasks").update_one(
             {"_id": task_id}, {"$set": {"destinations": destinations, "updated_at": utcnow()}}
         )
         await add_runtime_destination(db, destinations[index])
         await message.answer("Destination updated.")
     elif name == "task_storage":
-        value, _, _ = parse_channel_like_input(message, require_numeric=True)
+        value, _, _ = parse_channel_like_input(message, require_numeric=False)
         await db.col("tasks").update_one(
-            {"_id": task_id}, {"$set": {"storage_channel": int(value), "updated_at": utcnow()}}
+            {"_id": task_id}, {"$set": {"storage_channel": value, "updated_at": utcnow()}}
         )
         await message.answer("Storage channel saved.")
     elif name == "task_interval":
         seconds = parse_duration_seconds(message.text or "")
         await db.col("tasks").update_one(
-            {"_id": task_id}, {"$set": {"interval_seconds": seconds, "updated_at": utcnow()}}
+            {"_id": task_id},
+            {"$set": {"interval_seconds": seconds, "next_run_at": utcnow() + timedelta(seconds=seconds), "updated_at": utcnow()}},
         )
         await message.answer("Interval updated.")
     elif name == "task_amount":
@@ -804,11 +856,11 @@ def parse_channel_like_input(message: Message, require_numeric: bool) -> tuple[i
     if not raw:
         raise ValueError("send a chat ID, username, link, or forwarded message")
     parts = [part.strip() for part in raw.split("|")]
-    value: int | str = parts[0]
+    value: int | str = normalize_chat_input(parts[0])
     if str(value).lstrip("-").isdigit():
         value = int(value)
     elif require_numeric:
-        raise ValueError("numeric chat_id is required here")
+        raise ValueError("numeric chat_id is required here, or forward a message from the channel")
     title = parts[1] if len(parts) > 1 and parts[1] else None
     link = parts[2] if len(parts) > 2 and parts[2] else None
     return value, title, link
@@ -833,17 +885,46 @@ def forwarded_chat(message: Message) -> tuple[int, str | None] | None:
         origin = getattr(message, "forward_origin", None)
         chat = getattr(origin, "chat", None)
     if not chat:
+        chat = getattr(message, "sender_chat", None)
+    if not chat and getattr(message, "chat_shared", None):
+        shared = message.chat_shared
+        return int(shared.chat_id), None
+    if not chat:
         return None
     return int(chat.id), getattr(chat, "title", None) or getattr(chat, "username", None)
 
 
+def normalize_chat_input(raw: str) -> str:
+    value = raw.strip()
+    if "t.me/+" in value or "t.me/joinchat/" in value:
+        return value
+    if value.startswith("https://t.me/"):
+        return "@" + value.removeprefix("https://t.me/").split("/", 1)[0]
+    if value.startswith("http://t.me/"):
+        return "@" + value.removeprefix("http://t.me/").split("/", 1)[0]
+    if value.startswith("t.me/"):
+        return "@" + value.removeprefix("t.me/").split("/", 1)[0]
+    return value
+
+
 def parse_duration_seconds(raw: str) -> int:
     value = raw.strip().lower()
-    match = re.fullmatch(r"(\d+)\s*([smhd]?)", value)
+    aliases = {
+        "1 minute": 60,
+        "5 minutes": 300,
+        "10 minutes": 600,
+        "20 minutes": 1200,
+        "30 minutes": 1800,
+        "1 hour": 3600,
+    }
+    if value in aliases:
+        return aliases[value]
+    match = re.fullmatch(r"(\d+)\s*(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d)?", value)
     if not match:
-        raise ValueError("use a value like 30s, 5m, 1h, or 1d")
+        raise ValueError("use a value like 1 minute, 5m, 30m, 1 hour, or 1d")
     amount = int(match.group(1))
     unit = match.group(2) or "s"
+    unit = unit[0]
     multipliers = {"s": 1, "m": 60, "h": 3600, "d": 86400}
     seconds = amount * multipliers[unit]
     if seconds < 1:
@@ -854,11 +935,12 @@ def parse_duration_seconds(raw: str) -> int:
 async def add_runtime_destination(db: Database, destination: dict[str, Any]) -> None:
     runtime = await db.get_runtime_settings()
     destinations = runtime.get("destination_channels") or []
-    if any(int(item.get("chat_id")) == int(destination["chat_id"]) for item in destinations if item.get("chat_id")):
+    dest_id = str(destination["chat_id"])
+    if any(str(item.get("chat_id")) == dest_id for item in destinations if item.get("chat_id")):
         return
     destinations.append(
         {
-            "chat_id": int(destination["chat_id"]),
+            "chat_id": destination["chat_id"],
             "title": destination.get("title"),
             "link": destination.get("link"),
         }

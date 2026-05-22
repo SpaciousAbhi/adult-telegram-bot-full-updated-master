@@ -83,6 +83,7 @@ class Database:
         await self.col("users").create_index("telegram_id", unique=True, sparse=True)
         await self.col("users").create_index([("last_seen_at", DESCENDING)])
         await self.col("tasks").create_index([("status", ASCENDING), ("next_run_at", ASCENDING)])
+        await self.col("tasks").create_index([("status", ASCENDING), ("next_collect_at", ASCENDING)])
         await self.col("tasks").create_index("name")
         await self.col("media").create_index("token", unique=True)
         await self.col("media").create_index("fingerprint", unique=True)

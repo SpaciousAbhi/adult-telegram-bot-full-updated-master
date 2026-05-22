@@ -102,6 +102,7 @@ class Settings:
     poll_interval_seconds: int
     task_batch_limit: int
     source_harvest_limit: int
+    source_collect_interval_seconds: int
     source_collect_sleep_seconds: int
     local_mode: bool = False
 
@@ -178,6 +179,7 @@ def load_settings() -> Settings:
         poll_interval_seconds=max(5, _int_env("POLL_INTERVAL_SECONDS", 15)),
         task_batch_limit=max(1, _int_env("TASK_BATCH_LIMIT", 20)),
         source_harvest_limit=max(1, _int_env("SOURCE_HARVEST_LIMIT", 100)),
+        source_collect_interval_seconds=max(15, _int_env("SOURCE_COLLECT_INTERVAL_SECONDS", 60)),
         source_collect_sleep_seconds=max(0, _int_env("SOURCE_COLLECT_SLEEP_SECONDS", 1)),
         local_mode=os.getenv("LOCAL_MODE", "").strip().lower() in {"1", "true", "yes"},
     )

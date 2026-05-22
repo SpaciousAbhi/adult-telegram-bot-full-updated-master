@@ -84,6 +84,9 @@ def task_detail(task: dict[str, Any]) -> str:
         f"Videos per interval: {task.get('posts_per_interval', 1)}\n"
         f"Last run: {compact_dt(task.get('last_run_at'))}\n"
         f"Next run: {compact_dt(task.get('next_run_at'))}\n"
+        f"Next source scan: {compact_dt(task.get('next_collect_at'))}\n"
+        f"Last saved: {task.get('last_saved_count', 0)}\n"
+        f"Last posted: {task.get('last_post_count', 0)}\n"
         f"Last result: {task.get('last_error') or 'ok'}"
     )
 
