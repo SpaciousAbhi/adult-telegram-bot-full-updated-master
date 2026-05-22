@@ -17,6 +17,16 @@ class AdminParsingTests(unittest.TestCase):
         link = "https://t.me/+abcdef"
         self.assertEqual(normalize_chat_input(link), link)
 
+    def test_fix_channel_id(self):
+        from app.services.task_runner import fix_channel_id
+        self.assertEqual(fix_channel_id(3774139255), -1003774139255)
+        self.assertEqual(fix_channel_id("3774139255"), -1003774139255)
+        self.assertEqual(fix_channel_id("-3774139255"), -1003774139255)
+        self.assertEqual(fix_channel_id("-1003774139255"), -1003774139255)
+        self.assertEqual(fix_channel_id("@username"), "@username")
+        self.assertEqual(fix_channel_id("not_numeric"), "not_numeric")
+        self.assertEqual(fix_channel_id(None), None)
+
 
 if __name__ == "__main__":
     unittest.main()

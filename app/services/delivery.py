@@ -12,6 +12,7 @@ from app.database import Database
 from app.services.access import decide_access, today_query
 from app.services.referrals import ReferralService
 from app.timeutils import utcnow
+from app.services.task_runner import fix_channel_id
 
 
 def chat_ref(value: Any) -> int | str:
@@ -42,7 +43,7 @@ class DeliveryService:
             await self.send_limit_exhausted(chat_id, user_id, runtime, decision.limit)
             return False
 
-        storage_chat_id = media.get("storage_chat_id")
+        storage_chat_id = fix_channel_id(media.get("storage_chat_id"))
         storage_message_id = media.get("storage_message_id")
         if not storage_chat_id or not storage_message_id:
             await self.bot.send_message(chat_id, "Video storage is not ready for this item.")

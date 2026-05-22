@@ -27,7 +27,7 @@ from app.database import Database
 from app.guards import reject_callback_if_not_admin, reject_message_if_not_admin
 from app.services.force_subscription import ForceSubscriptionService
 from app.services.state import AdminStateStore
-from app.services.task_runner import TaskScheduler
+from app.services.task_runner import TaskScheduler, fix_channel_id
 from app.services.userbot import UserbotService
 from app.timeutils import utcnow
 from app.ui import keyboards, text
@@ -655,7 +655,7 @@ async def handle_access_update(message: Message, db: Database, name: str) -> Non
         )
         await message.answer("Premium granted.", reply_markup=keyboards.home_back_keyboard())
     elif name == "access_refchan":
-        channel_id = int(raw)
+        channel_id = int(fix_channel_id(raw))
         await db.set_runtime_path("referral.channel_id", channel_id)
         await message.answer("Referral channel updated.", reply_markup=keyboards.home_back_keyboard())
     elif name == "access_refrule":
@@ -851,7 +851,7 @@ def parse_channel_like_input(message: Message, require_numeric: bool) -> tuple[i
     forwarded = forwarded_chat(message)
     if forwarded:
         chat_id, title = forwarded
-        return chat_id, title, None
+        return fix_channel_id(chat_id), title, None
     raw = (message.text or "").strip()
     if not raw:
         raise ValueError("send a chat ID, username, link, or forwarded message")
@@ -863,7 +863,7 @@ def parse_channel_like_input(message: Message, require_numeric: bool) -> tuple[i
         raise ValueError("numeric chat_id is required here, or forward a message from the channel")
     title = parts[1] if len(parts) > 1 and parts[1] else None
     link = parts[2] if len(parts) > 2 and parts[2] else None
-    return value, title, link
+    return fix_channel_id(value), title, link
 
 
 def parse_force_input(message: Message) -> tuple[int, str | None, str | None, str]:

@@ -155,7 +155,7 @@ class TaskScheduler:
             compact_dt(now),
         )
 
-        storage_channel = task.get("storage_channel")
+        storage_channel = fix_channel_id(task.get("storage_channel"))
         destinations = [d for d in task.get("destinations", []) if d.get("status", "active") == "active"]
         sources = [s for s in task.get("sources", []) if s.get("status", "active") == "active"]
         if not storage_channel:
@@ -247,7 +247,7 @@ class TaskScheduler:
         runtime: dict[str, Any],
         remaining: int,
     ) -> int:
-        raw = source.get("value")
+        raw = fix_channel_id(source.get("value"))
         if not raw:
             return 0
         limit = max(remaining * 5, self.settings.task_batch_limit)
@@ -478,7 +478,7 @@ class TaskScheduler:
         attempted = 0
         posted_chats = {chat_ref(value) for value in (media.get("posted_destination_chat_ids") or [])}
         for destination in destinations:
-            chat_id = chat_ref(destination["chat_id"])
+            chat_id = chat_ref(fix_channel_id(destination["chat_id"]))
             if chat_id in posted_chats:
                 logger.info(
                     "task_destination_duplicate media_token=%s chat_id=%s reason=already_marked",
@@ -616,6 +616,19 @@ class TaskScheduler:
             except (TelegramBadRequest, TelegramForbiddenError) as exc:
                 update = {"done": True, "error": str(exc), "deleted_at": utcnow()}
             await self.db.col("messages_to_delete").update_one({"_id": item["_id"]}, {"$set": update})
+
+
+def fix_channel_id(value: Any) -> int | str:
+    if value is None:
+        return None
+    s = str(value).strip()
+    if s.lstrip("-").isdigit():
+        if s.startswith("-100"):
+            return int(s)
+        if s.startswith("-"):
+            return int(f"-100{s.lstrip('-')}")
+        return int(f"-100{s}")
+    return value
 
 
 def chat_ref(value: Any) -> int | str:
