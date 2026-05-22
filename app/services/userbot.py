@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import io
+import os
+import tempfile
 from typing import Any
 
 from app.config import ConfigError, Settings
@@ -221,7 +223,62 @@ def message_video_info(message: Any) -> dict[str, Any]:
     return {"size": size, "duration": duration}
 
 
+# Try to import cv2 gracefully
+try:
+    import cv2
+except ImportError:
+    cv2 = None
+
+
 async def download_thumbnail_bytes(message: Any) -> bytes | None:
+    # 1. If cv2 is available and the message is a video, try to extract a high-quality frame from it.
+    if cv2 is not None and message_has_video(message):
+        try:
+            client = getattr(message, "_client", None)
+            if client:
+                fd, temp_path = tempfile.mkstemp(suffix=".mp4")
+                try:
+                    downloaded_bytes = 0
+                    with os.fdopen(fd, "wb") as f:
+                        async for chunk in client.iter_download(message.media, chunk_size=256 * 1024):
+                            f.write(chunk)
+                            downloaded_bytes += len(chunk)
+                            # 3MB is usually enough to decode the header and get the first few keyframes
+                            if downloaded_bytes >= 3 * 1024 * 1024:
+                                break
+                    
+                    if downloaded_bytes > 0:
+                        cap = cv2.VideoCapture(temp_path)
+                        if cap.isOpened():
+                            best_frame = None
+                            frame_idx = 0
+                            success, frame = cap.read()
+                            # Search the first 100 frames to find a non-black/non-dark frame (brightness > 15)
+                            while success and frame_idx < 100:
+                                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                                avg_brightness = gray.mean()
+                                if avg_brightness > 15:
+                                    best_frame = frame
+                                    break
+                                if best_frame is None:
+                                    best_frame = frame
+                                success, frame = cap.read()
+                                frame_idx += 1
+                            cap.release()
+
+                            if best_frame is not None:
+                                success, encoded_image = cv2.imencode(".jpg", best_frame)
+                                if success:
+                                    return encoded_image.tobytes()
+                finally:
+                    try:
+                        os.unlink(temp_path)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    # 2. Fallback to the best quality thumbnail provided by Telegram.
     try:
         thumb_to_download: Any = 0
         document = getattr(message, "document", None)
@@ -250,4 +307,5 @@ async def download_thumbnail_bytes(message: Any) -> bytes | None:
         return buffer.getvalue() or None
     except Exception:
         return None
+
 

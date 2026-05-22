@@ -4,3 +4,5 @@ pymongo==4.9.2
 python-dotenv==1.0.1
 telethon==1.37.0
 psycopg[binary]==3.2.3
+opencv-python-headless==4.13.0.92
+
