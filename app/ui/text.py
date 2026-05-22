@@ -72,8 +72,9 @@ def tasks_home(tasks: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def task_detail(task: dict[str, Any]) -> str:
+def task_detail(task: dict[str, Any], pending_count: int, last_posted_token: str | None) -> str:
     storage = task.get("storage_channel") or "not set"
+    last_posted = last_posted_token or "none"
     return (
         f"Task: {task.get('name')}\n\n"
         f"Status: {task.get('status', 'draft')}\n"
@@ -82,6 +83,8 @@ def task_detail(task: dict[str, Any]) -> str:
         f"Storage channel: {storage}\n"
         f"Interval: {human_seconds(int(task.get('interval_seconds') or 300))}\n"
         f"Videos per interval: {task.get('posts_per_interval', 1)}\n"
+        f"Pending videos (in storage): {pending_count}\n"
+        f"Last posted token: {last_posted}\n"
         f"Last run: {compact_dt(task.get('last_run_at'))}\n"
         f"Next run: {compact_dt(task.get('next_run_at'))}\n"
         f"Next source scan: {compact_dt(task.get('next_collect_at'))}\n"

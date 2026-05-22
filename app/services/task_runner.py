@@ -4,7 +4,8 @@ import asyncio
 import logging
 import secrets
 from datetime import timedelta
-from typing import Any
+from typing import Any, Callable, Awaitable
+from bson import ObjectId
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
@@ -34,6 +35,8 @@ class TaskScheduler:
         self.bot = bot
         self._tasks: list[asyncio.Task[Any]] = []
         self._bot_username: str | None = None
+        self._running_collect_task_ids: set[str] = set()
+        self._running_post_task_ids: set[str] = set()
 
     async def start(self) -> None:
         self._tasks = [
@@ -93,28 +96,126 @@ class TaskScheduler:
             if not post_due and not collect_due:
                 logger.info("task_scheduler_skip task_id=%s reason=not_due", task.get("_id"))
                 continue
-            due += 1
-            logger.info(
-                "task_scheduler_due task_id=%s post_due=%s collect_due=%s",
-                task.get("_id"),
-                post_due,
-                collect_due,
-            )
-            try:
-                await self.run_task(task, collect_due=collect_due, post_due=post_due)
-            except Exception as exc:
-                logger.exception("task_scheduler_task_error task_id=%s", task.get("_id"))
-                await self.db.col("tasks").update_one(
-                    {"_id": task["_id"]},
-                    {
-                        "$set": {
-                            "last_error": str(exc),
-                            "last_run_at": utcnow(),
-                            "next_run_at": utcnow() + timedelta(seconds=int(task.get("interval_seconds") or 300)),
-                        }
-                    },
+
+            task_id = str(task["_id"])
+            is_collecting = task_id in self._running_collect_task_ids
+            is_posting = task_id in self._running_post_task_ids
+
+            update_fields: dict[str, Any] = {}
+            run_collect = False
+            run_post = False
+
+            if collect_due and not is_collecting:
+                self._running_collect_task_ids.add(task_id)
+                next_collect = now + timedelta(seconds=self.settings.source_collect_interval_seconds)
+                update_fields["next_collect_at"] = next_collect
+                run_collect = True
+
+            if post_due and not is_posting:
+                self._running_post_task_ids.add(task_id)
+                interval = int(task.get("interval_seconds") or 300)
+                next_run = now + timedelta(seconds=interval)
+                update_fields["next_run_at"] = next_run
+                run_post = True
+
+            if update_fields:
+                due += 1
+                logger.info(
+                    "task_scheduler_due_spawn task_id=%s run_collect=%s run_post=%s",
+                    task_id,
+                    run_collect,
+                    run_post,
                 )
+                await self.db.col("tasks").update_one({"_id": task["_id"]}, {"$set": update_fields})
+                asyncio.create_task(self._execute_task_bg(task_id, run_collect, run_post))
+
         logger.info("task_scheduler_tick_complete scanned=%s due=%s now=%s", scanned, due, compact_dt(now))
+
+    async def _execute_task_bg(self, task_id: str, run_collect: bool, run_post: bool) -> None:
+        try:
+            task = await self.db.col("tasks").find_one({"_id": ObjectId(task_id)})
+            if not task:
+                return
+            await self._run_task_internal(task, run_collect=run_collect, run_post=run_post)
+        except Exception:
+            logger.exception("task_runner_bg_error task_id=%s", task_id)
+        finally:
+            if run_collect:
+                self._running_collect_task_ids.discard(task_id)
+            if run_post:
+                self._running_post_task_ids.discard(task_id)
+
+    async def _run_task_internal(self, task: dict[str, Any], run_collect: bool, run_post: bool) -> None:
+        task_id = task["_id"]
+        storage_channel = fix_channel_id(task.get("storage_channel"))
+        destinations = [d for d in task.get("destinations", []) if d.get("status", "active") == "active"]
+        sources = [s for s in task.get("sources", []) if s.get("status", "active") == "active"]
+
+        if not storage_channel:
+            await self.db.col("tasks").update_one(
+                {"_id": task_id},
+                {"$set": {"last_error": "Task needs a storage channel", "updated_at": utcnow()}}
+            )
+            return
+
+        saved = 0
+        source_error = None
+        updated_sources = list(task.get("sources", []))
+        if run_collect and sources:
+            userbot = UserbotService(self.db, self.settings)
+            client = await userbot.client()
+            if not client:
+                source_error = "Userbot is not logged in or not configured"
+            else:
+                for source in updated_sources:
+                    if source.get("status", "active") != "active":
+                        continue
+                    if saved >= self.settings.source_harvest_limit:
+                        break
+                    try:
+                        count = await self._collect_from_source(
+                            client=client,
+                            task=task,
+                            source=source,
+                            storage_channel=storage_channel,
+                            runtime=await self.db.get_runtime_settings(),
+                            remaining=self.settings.source_harvest_limit - saved,
+                        )
+                        saved += count
+                    except Exception as exc:
+                        logger.exception("task_collect_source_error task_id=%s source=%r", task_id, source.get("value"))
+                        source_error = f"Source scan failed: {exc}"
+
+                await self.db.col("tasks").update_one(
+                    {"_id": task_id},
+                    {"$set": {"sources": updated_sources, "updated_at": utcnow()}}
+                )
+
+        posted = 0
+        posting_error = None
+        if run_post and destinations:
+            posts_per_interval = int(task.get("posts_per_interval") or 1)
+            try:
+                posted, post_errors = await self.post_stored_to_destinations(task, destinations, await self.db.get_runtime_settings(), posts_per_interval)
+                if post_errors:
+                    posting_error = "; ".join(post_errors)
+            except Exception as exc:
+                logger.exception("task_post_destinations_error task_id=%s", task_id)
+                posting_error = str(exc)
+
+        last_error = posting_error or source_error
+        update_doc: dict[str, Any] = {
+            "last_run_at": utcnow(),
+            "updated_at": utcnow(),
+        }
+        update_doc["last_error"] = last_error
+
+        if run_collect:
+            update_doc["last_saved_count"] = saved
+        if run_post:
+            update_doc["last_post_count"] = posted
+
+        await self.db.col("tasks").update_one({"_id": task_id}, {"$set": update_doc})
 
     def _is_due(self, value: Any, now: Any) -> bool:
         if value is None:
@@ -131,112 +232,100 @@ class TaskScheduler:
         collect_due: bool | None = None,
         post_due: bool | None = None,
     ) -> None:
-        if task.get("status") != ACTIVE_TASK and not force:
-            logger.info("task_cycle_skipped task_id=%s reason=status_%s", task.get("_id"), task.get("status"))
-            return
-        now = utcnow()
-        collect_due = self._is_due(task.get("next_collect_at"), now) if collect_due is None else collect_due
-        post_due = self._is_due(task.get("next_run_at"), now) if post_due is None else post_due
-        if force:
-            collect_due = True
-            post_due = True
-        interval = int(task.get("interval_seconds") or 300)
-        posts_per_interval = int(task.get("posts_per_interval") or 1)
-        runtime = await self.db.get_runtime_settings()
-        logger.info(
-            "task_cycle_started task_id=%s name=%r force=%s collect_due=%s post_due=%s interval=%ss amount=%s now=%s",
-            task.get("_id"),
-            task.get("name"),
-            force,
-            collect_due,
-            post_due,
-            interval,
-            posts_per_interval,
-            compact_dt(now),
+        await self._run_task_internal(
+            task,
+            run_collect=collect_due is not False,
+            run_post=post_due is not False,
         )
+
+    async def run_task_manual(self, task_id: str, progress_callback: Callable[[str], Awaitable[None]]) -> None:
+        await progress_callback("🔄 Manual Run: Fetching task details...")
+        task = await self.db.col("tasks").find_one({"_id": ObjectId(task_id)})
+        if not task:
+            await progress_callback("❌ Manual Run: Task not found.")
+            return
 
         storage_channel = fix_channel_id(task.get("storage_channel"))
         destinations = [d for d in task.get("destinations", []) if d.get("status", "active") == "active"]
         sources = [s for s in task.get("sources", []) if s.get("status", "active") == "active"]
+
         if not storage_channel:
-            await self._finish_task_run(task, interval, "Task needs a storage channel")
+            await progress_callback("❌ Manual Run: Task needs a storage channel.")
             return
 
         saved = 0
-        updated_sources = list(task.get("sources", []))
         source_error = None
-        if collect_due and sources:
+        updated_sources = list(task.get("sources", []))
+        if sources:
+            await progress_callback("🔄 Manual Run: Connecting to userbot...")
             userbot = UserbotService(self.db, self.settings)
             client = await userbot.client()
             if not client:
                 source_error = "Userbot is not logged in or not configured"
-                logger.info("task_collect_skipped task_id=%s reason=userbot_not_ready", task.get("_id"))
+                await progress_callback("⚠️ Manual Run: Userbot not ready. Skipping collection.")
             else:
-                logger.info(
-                    "task_collect_started task_id=%s sources=%s storage_channel=%s harvest_limit=%s",
-                    task.get("_id"),
-                    len(sources),
-                    storage_channel,
-                    self.settings.source_harvest_limit,
-                )
-                for source in updated_sources:
-                    if saved >= self.settings.source_harvest_limit:
-                        break
+                await progress_callback(f"🔄 Manual Run: Scanning {len(sources)} sources...")
+                for idx, source in enumerate(updated_sources):
                     if source.get("status", "active") != "active":
-                        logger.info(
-                            "task_source_skipped task_id=%s source=%r reason=status_%s",
-                            task.get("_id"),
-                            source.get("value"),
-                            source.get("status"),
-                        )
                         continue
-                    count = await self._collect_from_source(
-                        client=client,
-                        task=task,
-                        source=source,
-                        storage_channel=storage_channel,
-                        runtime=runtime,
-                        remaining=self.settings.source_harvest_limit - saved,
-                    )
-                    saved += count
-        elif collect_due:
-            logger.info("task_collect_skipped task_id=%s reason=no_active_sources", task.get("_id"))
+                    await progress_callback(f"🔄 Manual Run: Scanning source {idx+1}/{len(sources)} ({source.get('title') or source.get('value')})...")
+                    try:
+                        count = await self._collect_from_source(
+                            client=client,
+                            task=task,
+                            source=source,
+                            storage_channel=storage_channel,
+                            runtime=await self.db.get_runtime_settings(),
+                            remaining=self.settings.source_harvest_limit - saved,
+                        )
+                        saved += count
+                    except Exception as exc:
+                        logger.exception("Manual collect failed for source %s", source.get("value"))
+                        source_error = f"Source scan failed: {exc}"
+
+                await self.db.col("tasks").update_one(
+                    {"_id": task["_id"]},
+                    {"$set": {"sources": updated_sources, "updated_at": utcnow()}}
+                )
 
         posted = 0
-        if post_due and destinations:
-            logger.info(
-                "task_destination_started task_id=%s destinations=%s amount=%s",
-                task.get("_id"),
-                len(destinations),
-                posts_per_interval,
-            )
-            posted = await self.post_stored_to_destinations(task, destinations, runtime, posts_per_interval)
-        elif post_due:
-            logger.info("task_destination_skipped task_id=%s reason=no_active_destinations", task.get("_id"))
+        posting_error = None
+        if destinations:
+            posts_per_interval = int(task.get("posts_per_interval") or 1)
+            await progress_callback(f"🔄 Manual Run: Posting up to {posts_per_interval} videos to {len(destinations)} destinations...")
+            try:
+                posted, post_errors = await self.post_stored_to_destinations(task, destinations, await self.db.get_runtime_settings(), posts_per_interval)
+                if post_errors:
+                    posting_error = "; ".join(post_errors)
+            except Exception as exc:
+                logger.exception("Manual post failed")
+                posting_error = str(exc)
+        else:
+            await progress_callback("⚠️ Manual Run: No active destinations configured.")
 
-        update_doc: dict[str, Any] = {
-            "sources": updated_sources,
-            "last_error": source_error,
+        last_error = posting_error or source_error
+        update_doc = {
             "last_saved_count": saved,
             "last_post_count": posted,
             "last_run_at": utcnow(),
+            "last_error": last_error,
             "updated_at": utcnow(),
         }
-        if collect_due:
-            update_doc["next_collect_at"] = utcnow() + timedelta(seconds=self.settings.source_collect_interval_seconds)
-        if post_due:
-            update_doc["next_run_at"] = utcnow() + timedelta(seconds=interval)
-        logger.info(
-            "task_cycle_finished task_id=%s saved=%s posted=%s next_run=%s next_collect=%s error=%r",
-            task.get("_id"),
-            saved,
-            posted,
-            compact_dt(update_doc.get("next_run_at") or task.get("next_run_at")),
-            compact_dt(update_doc.get("next_collect_at") or task.get("next_collect_at")),
-            source_error,
-        )
         await self.db.col("tasks").update_one({"_id": task["_id"]}, {"$set": update_doc})
-        return
+
+        if last_error:
+            await progress_callback(
+                f"⚠️ Manual Run Finished with issues.\n\n"
+                f"- Saved to storage: {saved} videos\n"
+                f"- Posted to destinations: {posted} videos\n"
+                f"- Error: {last_error}"
+            )
+        else:
+            await progress_callback(
+                f"✅ Manual Run Completed Successfully!\n\n"
+                f"- Saved to storage: {saved} videos\n"
+                f"- Posted to destinations: {posted} videos"
+            )
 
     async def _collect_from_source(
         self,
@@ -435,10 +524,11 @@ class TaskScheduler:
         destinations: list[dict[str, Any]],
         runtime: dict[str, Any],
         limit: int,
-    ) -> int:
+    ) -> tuple[int, list[str]]:
         posted = 0
+        all_errors: list[str] = []
         pending = await self.db.col("media").count_documents(
-            {"task_id": task["_id"], "storage_status": "stored", "destination_status": {"$ne": "posted"}}
+            {"task_id": task["_id"], "storage_status": "stored", "destination_status": "pending"}
         )
         logger.info(
             "task_destination_pending task_id=%s pending_media=%s limit=%s destinations=%s",
@@ -449,15 +539,18 @@ class TaskScheduler:
         )
         cursor = (
             self.db.col("media")
-            .find({"task_id": task["_id"], "storage_status": "stored", "destination_status": {"$ne": "posted"}})
+            .find({"task_id": task["_id"], "storage_status": "stored", "destination_status": "pending"})
             .sort("created_at", 1)
             .limit(limit)
         )
         async for media in cursor:
-            if await self._post_destinations(media, destinations, media.get("thumbnail_bytes"), runtime):
+            attempted, errors = await self._post_destinations(media, destinations, media.get("thumbnail_bytes"), runtime)
+            if attempted > 0:
                 posted += 1
-        logger.info("task_destination_finished task_id=%s posted_media=%s", task.get("_id"), posted)
-        return posted
+            if errors:
+                all_errors.extend(errors)
+        logger.info("task_destination_finished task_id=%s posted_media=%s errors=%s", task.get("_id"), posted, all_errors)
+        return posted, all_errors
 
     async def _post_destinations(
         self,
@@ -465,11 +558,12 @@ class TaskScheduler:
         destinations: list[dict[str, Any]],
         thumb_bytes: bytes | None,
         runtime: dict[str, Any],
-    ) -> bool:
+    ) -> tuple[int, list[str]]:
         username = await self.bot_username()
+        errors: list[str] = []
         if not username:
             logger.info("task_destination_skipped_media media_token=%s reason=bot_username_missing", media.get("token"))
-            return False
+            return 0, ["Bot username is missing or not initialized"]
         deep_link = f"https://t.me/{username}?start=get_{media['token']}"
         caption = self.destination_caption(media)
         markup = InlineKeyboardMarkup(
@@ -506,13 +600,13 @@ class TaskScheduler:
                     )
                 else:
                     sent = await self.bot.send_message(chat_id=chat_id, text=caption, reply_markup=markup)
-            except (TelegramBadRequest, TelegramForbiddenError) as exc:
-                logger.info(
-                    "task_destination_post_failed media_token=%s chat_id=%s error=%s",
+            except Exception as exc:
+                logger.exception(
+                    "task_destination_post_failed media_token=%s chat_id=%s",
                     media.get("token"),
                     chat_id,
-                    exc,
                 )
+                errors.append(f"Destination {chat_id} failed: {exc}")
                 await self.db.col("destination_posts").update_one(
                     {"media_token": media["token"], "chat_id": chat_id},
                     {"$set": {"error": str(exc), "updated_at": utcnow()}, "$setOnInsert": {"created_at": utcnow()}},
@@ -536,7 +630,15 @@ class TaskScheduler:
                 sent.message_id,
             )
             await self._schedule_destination_delete(runtime, chat_id, sent.message_id)
-        destination_status = "posted" if all(chat_ref(d["chat_id"]) in posted_chats for d in destinations) else "partial"
+
+        all_destination_chat_ids = {chat_ref(fix_channel_id(d["chat_id"])) for d in destinations}
+        if all(c_id in posted_chats for c_id in all_destination_chat_ids):
+            destination_status = "posted"
+        elif not any(c_id in posted_chats for c_id in all_destination_chat_ids) and errors:
+            destination_status = "failed"
+        else:
+            destination_status = "partial"
+
         await self.db.col("media").update_one(
             {"_id": media["_id"]},
             {
@@ -548,13 +650,14 @@ class TaskScheduler:
             },
         )
         logger.info(
-            "task_destination_media_finished media_token=%s attempted=%s status=%s posted_chats=%s",
+            "task_destination_media_finished media_token=%s attempted=%s status=%s posted_chats=%s errors=%s",
             media.get("token"),
             attempted,
             destination_status,
             len(posted_chats),
+            errors,
         )
-        return attempted > 0
+        return attempted, errors
 
     def destination_caption(self, media: dict[str, Any]) -> str:
         duration = human_seconds(media.get("duration"))

@@ -50,18 +50,12 @@ class DeliveryService:
             return False
 
         try:
-            if runtime.get("forward_tag_enabled"):
-                sent = await self.bot.forward_message(
-                    chat_id=chat_id,
-                    from_chat_id=chat_ref(storage_chat_id),
-                    message_id=int(storage_message_id),
-                )
-            else:
-                sent = await self.bot.copy_message(
-                    chat_id=chat_id,
-                    from_chat_id=chat_ref(storage_chat_id),
-                    message_id=int(storage_message_id),
-                )
+            sent = await self.bot.copy_message(
+                chat_id=chat_id,
+                from_chat_id=chat_ref(storage_chat_id),
+                message_id=int(storage_message_id),
+                caption="@venom_stone_network",
+            )
         except (TelegramBadRequest, TelegramForbiddenError):
             await self.bot.send_message(chat_id, "I could not deliver this video. Please try again later.")
             return False

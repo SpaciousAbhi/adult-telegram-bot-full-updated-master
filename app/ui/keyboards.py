@@ -72,19 +72,17 @@ def task_detail_keyboard(task: dict[str, Any]) -> InlineKeyboardMarkup:
     task_id = str(task["_id"])
     status = task.get("status", "draft")
     rows = [
-        [btn("Add Source", cb("task", "addsrc", task_id)), btn("Add Destination", cb("task", "adddst", task_id))],
-        [btn("Manage Sources", cb("task", "srcs", task_id)), btn("Manage Destinations", cb("task", "dsts", task_id))],
-        [btn("Set Storage Channel", cb("task", "storage", task_id)), btn("Remove Storage", cb("task", "clearstorage", task_id))],
-        [btn("Set Interval", cb("task", "interval", task_id)), btn("Set Amount", cb("task", "amount", task_id))],
-        [btn("Run Now", cb("task", "runnow", task_id))],
+        [btn("➕ Add Source", cb("task", "addsrc", task_id)), btn("➕ Add Destination", cb("task", "adddst", task_id))],
+        [btn("📂 Manage Sources", cb("task", "srcs", task_id)), btn("📂 Manage Destinations", cb("task", "dsts", task_id))],
+        [btn("📦 Storage Channel", cb("task", "storage", task_id)), btn("❌ Remove Storage", cb("task", "clearstorage", task_id))],
+        [btn("⏱️ Set Interval", cb("task", "interval", task_id)), btn("🔢 Set Amount", cb("task", "amount", task_id))],
     ]
     if status == "active":
-        rows.append([btn("Pause Task", cb("task", "pause", task_id)), btn("Stop Task", cb("task", "stop", task_id))])
-    elif status == "paused":
-        rows.append([btn("Resume Task", cb("task", "resume", task_id)), btn("Stop Task", cb("task", "stop", task_id))])
+        rows.append([btn("⏸️ Pause Auto-Posting", cb("task", "pause", task_id))])
     else:
-        rows.append([btn("Start Task", cb("task", "resume", task_id)), btn("Stop Task", cb("task", "stop", task_id))])
-    rows.extend([[btn("Refresh", cb("task", "open", task_id))], [btn("Back", TASKS_HOME)]])
+        rows.append([btn("▶️ Start Auto-Posting", cb("task", "resume", task_id))])
+    rows.append([btn("⚡ Run Now", cb("task", "runnow", task_id)), btn("🔄 Refresh", cb("task", "open", task_id))])
+    rows.append([btn("◀️ Back to Tasks", TASKS_HOME)])
     return mk(rows)
 
 

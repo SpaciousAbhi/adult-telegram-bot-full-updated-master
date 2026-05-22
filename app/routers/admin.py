@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from datetime import timedelta
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from aiogram import Bot, F, Router
 from aiogram.filters import Command
@@ -209,18 +212,11 @@ async def task_callbacks(
         await show_task(query, db, parts[2])
         return
     if action == "runnow" and len(parts) >= 3:
-        task = await db.col("tasks").find_one({"_id": ObjectId(parts[2])})
-        if not task:
-            await query.answer("Task not found", show_alert=True)
+        if not scheduler:
+            await query.answer("Scheduler is not running", show_alert=True)
             return
-        await query.answer("Running task now...")
-        if scheduler:
-            await scheduler.run_task(task, force=True)
-        else:
-            await db.col("tasks").update_one(
-                {"_id": task["_id"]}, {"$set": {"next_run_at": utcnow(), "updated_at": utcnow()}}
-            )
-        await show_task(query, db, parts[2])
+        await query.answer("Manual run started")
+        asyncio.create_task(run_manual_with_progress_edit(query, db, scheduler, parts[2]))
         return
     if action == "clearstorage" and len(parts) >= 3:
         await db.col("tasks").update_one(
@@ -252,18 +248,24 @@ async def task_callbacks(
             await show_task_destinations(query, db, parts[2])
         return
     if action in {"pause", "resume", "stop"} and len(parts) >= 3:
-        status = {"pause": "paused", "resume": "active", "stop": "stopped"}[action]
+        status = "active" if action == "resume" else "paused"
+        update_fields: dict[str, Any] = {
+            "status": status,
+            "updated_at": utcnow(),
+        }
+        if status == "active":
+            update_fields["next_run_at"] = utcnow()
+            update_fields["next_collect_at"] = utcnow()
+            update_fields["last_error"] = None
+        else:
+            update_fields["next_run_at"] = None
+            update_fields["next_collect_at"] = None
+
         await db.col("tasks").update_one(
             {"_id": ObjectId(parts[2])},
-            {
-                "$set": {
-                    "status": status,
-                    "updated_at": utcnow(),
-                    "next_run_at": utcnow() if status == "active" else None,
-                }
-            },
+            {"$set": update_fields}
         )
-        await query.answer(f"Task {status}")
+        await query.answer(f"Auto-posting {'started' if status == 'active' else 'paused'}")
         await show_task(query, db, parts[2])
         return
     await query.answer("Unknown task action", show_alert=True)
@@ -550,8 +552,7 @@ async def handle_task_new(message: Message, db: Database) -> None:
         "updated_at": utcnow(),
     }
     result = await db.col("tasks").insert_one(doc)
-    task = await db.col("tasks").find_one({"_id": result.inserted_id})
-    await message.answer(text.task_detail(task), reply_markup=keyboards.task_detail_keyboard(task))
+    await show_task_details_view(message, db, result.inserted_id)
 
 
 async def handle_task_update(message: Message, db: Database, name: str, payload: dict[str, Any]) -> None:
@@ -615,8 +616,7 @@ async def handle_task_update(message: Message, db: Database, name: str, payload:
             {"_id": task_id}, {"$set": {"posts_per_interval": amount, "updated_at": utcnow()}}
         )
         await message.answer("Videos per interval updated.")
-    task = await db.col("tasks").find_one({"_id": task_id})
-    await message.answer(text.task_detail(task), reply_markup=keyboards.task_detail_keyboard(task))
+    await show_task_details_view(message, db, task_id)
 
 
 async def handle_force_add(message: Message, db: Database, bot: Bot) -> None:
@@ -783,12 +783,84 @@ async def list_tasks(db: Database) -> list[dict[str, Any]]:
     return [doc async for doc in cursor]
 
 
-async def show_task(query: CallbackQuery, db: Database, task_id: str) -> None:
+async def render_task_detail(
+    db: Database,
+    task_id: str | ObjectId,
+) -> tuple[str, Any]:
     task = await db.col("tasks").find_one({"_id": ObjectId(task_id)})
     if not task:
-        await query.answer("Task not found", show_alert=True)
+        return "Task not found", None
+    
+    pending_count = await db.col("media").count_documents({
+        "task_id": task["_id"],
+        "storage_status": "stored",
+        "destination_status": "pending",
+    })
+    
+    last_posted_doc = await db.col("media").find_one(
+        {"task_id": task["_id"], "destination_status": "posted"},
+        sort=[("destination_posted_at", -1), ("created_at", -1)]
+    )
+    last_posted_token = last_posted_doc.get("token") if last_posted_doc else None
+    
+    body = text.task_detail(task, pending_count, last_posted_token)
+    markup = keyboards.task_detail_keyboard(task)
+    return body, markup
+
+
+async def show_task_details_view(
+    query_or_message: CallbackQuery | Message,
+    db: Database,
+    task_id: str | ObjectId,
+) -> None:
+    body, markup = await render_task_detail(db, task_id)
+    if not markup:
+        if isinstance(query_or_message, CallbackQuery):
+            await query_or_message.answer(body, show_alert=True)
+        else:
+            await query_or_message.answer(body)
         return
-    await safe_edit(query, text.task_detail(task), keyboards.task_detail_keyboard(task))
+        
+    if isinstance(query_or_message, CallbackQuery):
+        await safe_edit(query_or_message, body, markup)
+    else:
+        await query_or_message.answer(body, reply_markup=markup)
+
+
+async def show_task(query: CallbackQuery, db: Database, task_id: str) -> None:
+    await show_task_details_view(query, db, task_id)
+
+
+async def run_manual_with_progress_edit(
+    query: CallbackQuery,
+    db: Database,
+    scheduler: TaskScheduler,
+    task_id: str,
+) -> None:
+    message = query.message
+    last_text = ""
+
+    async def progress_callback(text_msg: str) -> None:
+        nonlocal last_text
+        if text_msg == last_text:
+            return
+        last_text = text_msg
+        
+        back_markup = keyboards.mk([[keyboards.btn("◀️ Back to Task Details", keyboards.cb("task", "open", task_id))]])
+        try:
+            await message.edit_text(text_msg, reply_markup=back_markup)
+        except Exception:
+            pass
+
+    try:
+        await scheduler.run_task_manual(task_id, progress_callback)
+    except Exception as exc:
+        logger.exception("Manual run failed for task %s", task_id)
+        back_markup = keyboards.mk([[keyboards.btn("◀️ Back to Task Details", keyboards.cb("task", "open", task_id))]])
+        try:
+            await message.edit_text(f"❌ Manual Run Failed:\n{exc}", reply_markup=back_markup)
+        except Exception:
+            pass
 
 
 async def show_task_sources(query: CallbackQuery, db: Database, task_id: str) -> None:
