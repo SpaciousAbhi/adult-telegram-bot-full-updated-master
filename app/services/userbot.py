@@ -223,10 +223,31 @@ def message_video_info(message: Any) -> dict[str, Any]:
 
 async def download_thumbnail_bytes(message: Any) -> bytes | None:
     try:
+        thumb_to_download: Any = 0
+        document = getattr(message, "document", None)
+        thumbs = getattr(document, "thumbs", None) if document else None
+        if not thumbs:
+            photo = getattr(message, "photo", None)
+            thumbs = getattr(photo, "sizes", None) if photo else None
+
+        if thumbs:
+            def get_thumb_score(t: Any) -> int:
+                w = getattr(t, "w", 0) or 0
+                h = getattr(t, "h", 0) or 0
+                size = getattr(t, "size", 0) or 0
+                if not size and hasattr(t, "bytes"):
+                    size = len(getattr(t, "bytes") or b"")
+                return w * h or size
+
+            valid_thumbs = [t for t in thumbs if t]
+            if valid_thumbs:
+                thumb_to_download = max(valid_thumbs, key=get_thumb_score)
+
         buffer = io.BytesIO()
-        result = await message.download_media(file=buffer, thumb=0)
+        result = await message.download_media(file=buffer, thumb=thumb_to_download)
         if result is None:
             return None
         return buffer.getvalue() or None
     except Exception:
         return None
+
