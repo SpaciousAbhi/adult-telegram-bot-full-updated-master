@@ -1,0 +1,39 @@
+{
+  "name": "Adult Telegram Delivery Bot",
+  "description": "Heroku-ready Telegram bot with task posting, MongoDB storage, force subscription, access limits, referrals, userbot control, and broadcasting.",
+  "repository": "https://github.com/SpaciousAbhi/adult-telegram-bot-full-updated-master",
+  "env": {
+    "BOT_TOKEN": {
+      "description": "Telegram bot token from BotFather.",
+      "required": true
+    },
+    "ADMIN_ID": {
+      "description": "Telegram numeric admin ID. Multiple IDs may be comma-separated.",
+      "required": true
+    },
+    "MONGO_URI": {
+      "description": "MongoDB connection URI. DATABASE_URL is also accepted only when it contains a mongodb:// or mongodb+srv:// URI.",
+      "required": true
+    },
+    "API_ID": {
+      "description": "Optional Telegram API ID for userbot source collection.",
+      "required": false
+    },
+    "API_HASH": {
+      "description": "Optional Telegram API hash for userbot source collection.",
+      "required": false
+    }
+  },
+  "formation": {
+    "worker": {
+      "quantity": 1,
+      "size": "basic"
+    }
+  },
+  "buildpacks": [
+    {
+      "url": "heroku/python"
+    }
+  ]
+}
+
