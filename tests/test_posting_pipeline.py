@@ -4,20 +4,19 @@ from bson import ObjectId
 from app.services.task_runner import TaskScheduler
 
 class PostingPipelineTests(unittest.IsolatedAsyncioTestCase):
-    async def test_destination_posting_uses_thumbnail_file_id(self):
+    async def test_destination_posting_downloads_thumbnail_on_the_fly(self):
         db = MagicMock()
         settings = MagicMock()
         bot = AsyncMock()
         
         scheduler = TaskScheduler(db, settings, bot)
         
-        fake_file_id = "AgACAgIAAxkBAAECBAFm..."
         media_doc = {
             "_id": ObjectId("60c72b2f9b1d8b2bad000005"),
             "token": "testtoken123",
             "fingerprint": "testfingerprint",
+            "storage_chat_id": -100123456789,
             "storage_message_id": 12345,
-            "thumbnail_file_id": fake_file_id,
             "posted_destination_chat_ids": []
         }
         
@@ -40,18 +39,27 @@ class PostingPipelineTests(unittest.IsolatedAsyncioTestCase):
         destinations = [{"chat_id": -100987654321, "status": "active"}]
         runtime = {}
         
-        posted, errors = await scheduler.post_stored_to_destinations(task, destinations, runtime, limit=1)
+        client = AsyncMock()
+        fake_msg = MagicMock()
+        client.get_messages = AsyncMock(return_value=fake_msg)
         
-        self.assertEqual(posted, 1)
-        self.assertEqual(len(errors), 0)
-        
-        bot.send_photo.assert_called_once()
-        call_kwargs = bot.send_photo.call_args[1]
-        
-        self.assertEqual(call_kwargs["chat_id"], -100987654321)
-        self.assertEqual(call_kwargs["has_spoiler"], True)
-        
-        self.assertEqual(call_kwargs["photo"], fake_file_id)
+        with patch("app.services.task_runner.download_thumbnail_bytes", new_callable=AsyncMock) as mock_download:
+            mock_download.return_value = b"fake_jpeg_image_bytes"
+            
+            posted, errors = await scheduler.post_stored_to_destinations(task, destinations, runtime, limit=1, client=client)
+            
+            self.assertEqual(posted, 1)
+            self.assertEqual(len(errors), 0)
+            
+            client.get_messages.assert_called_once_with(-100123456789, ids=12345)
+            mock_download.assert_called_once_with(fake_msg)
+            
+            bot.send_photo.assert_called_once()
+            call_kwargs = bot.send_photo.call_args[1]
+            self.assertEqual(call_kwargs["chat_id"], -100987654321)
+            self.assertEqual(call_kwargs["has_spoiler"], True)
+            self.assertEqual(call_kwargs["photo"].data, b"fake_jpeg_image_bytes")
+            self.assertEqual(call_kwargs["photo"].filename, "thumbnail.jpg")
 
 
 if __name__ == "__main__":

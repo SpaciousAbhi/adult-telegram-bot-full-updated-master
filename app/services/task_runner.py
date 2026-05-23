@@ -178,47 +178,55 @@ class TaskScheduler:
         saved = 0
         source_error = None
         updated_sources = list(task.get("sources", []))
-        if run_collect and sources:
+        client = None
+        if (run_collect and sources) or (run_post and destinations):
+            userbot = UserbotService(self.db, self.settings)
+            client = await userbot.client()
+            if not client:
+                source_error = "Userbot is not logged in or not configured"
+
+        if run_collect and sources and client:
             # Set status to collecting when collection starts
             await self.db.col("tasks").update_one(
                 {"_id": task_id},
                 {"$set": {"status": "collecting", "updated_at": utcnow()}}
             )
-            userbot = UserbotService(self.db, self.settings)
-            client = await userbot.client()
-            if not client:
-                source_error = "Userbot is not logged in or not configured"
-            else:
-                for source in updated_sources:
-                    if source.get("status", "active") != "active":
-                        continue
-                    if saved >= self.settings.source_harvest_limit:
-                        break
-                    try:
-                        count = await self._collect_from_source(
-                            client=client,
-                            task=task,
-                            source=source,
-                            storage_channel=storage_channel,
-                            runtime=await self.db.get_runtime_settings(),
-                            remaining=self.settings.source_harvest_limit - saved,
-                        )
-                        saved += count
-                    except Exception as exc:
-                        logger.exception("task_collect_source_error task_id=%s source=%r", task_id, source.get("value"))
-                        source_error = f"Source scan failed: {exc}"
+            for source in updated_sources:
+                if source.get("status", "active") != "active":
+                    continue
+                if saved >= self.settings.source_harvest_limit:
+                    break
+                try:
+                    count = await self._collect_from_source(
+                        client=client,
+                        task=task,
+                        source=source,
+                        storage_channel=storage_channel,
+                        runtime=await self.db.get_runtime_settings(),
+                        remaining=self.settings.source_harvest_limit - saved,
+                    )
+                    saved += count
+                except Exception as exc:
+                    logger.exception("task_collect_source_error task_id=%s source=%r", task_id, source.get("value"))
+                    source_error = f"Source scan failed: {exc}"
 
-                await self.db.col("tasks").update_one(
-                    {"_id": task_id},
-                    {"$set": {"sources": updated_sources, "updated_at": utcnow()}}
-                )
+            await self.db.col("tasks").update_one(
+                {"_id": task_id},
+                {"$set": {"sources": updated_sources, "updated_at": utcnow()}}
+            )
 
         posted = 0
         posting_error = None
         if run_post and destinations:
             posts_per_interval = int(task.get("posts_per_interval") or 1)
             try:
-                posted, post_errors = await self.post_stored_to_destinations(task, destinations, await self.db.get_runtime_settings(), posts_per_interval)
+                posted, post_errors = await self.post_stored_to_destinations(
+                    task,
+                    destinations,
+                    await self.db.get_runtime_settings(),
+                    posts_per_interval,
+                    client=client
+                )
                 if post_errors:
                     posting_error = "; ".join(post_errors)
             except Exception as exc:
@@ -273,31 +281,40 @@ class TaskScheduler:
         )
 
     async def run_task_manual(self, task_id: str, progress_callback: Callable[[str], Awaitable[None]]) -> None:
-        await progress_callback("🔄 Manual Run: Fetching task details...")
-        task = await self.db.col("tasks").find_one({"_id": ObjectId(task_id)})
-        if not task:
-            await progress_callback("❌ Manual Run: Task not found.")
+        if task_id in self._running_collect_task_ids or task_id in self._running_post_task_ids:
+            await progress_callback("⚠️ Manual Run: This task is already running in the background. Please wait.")
             return
 
-        storage_channel = fix_channel_id(task.get("storage_channel"))
-        destinations = [d for d in task.get("destinations", []) if d.get("status", "active") == "active"]
-        sources = [s for s in task.get("sources", []) if s.get("status", "active") == "active"]
+        self._running_collect_task_ids.add(task_id)
+        self._running_post_task_ids.add(task_id)
+        try:
+            await progress_callback("🔄 Manual Run: Fetching task details...")
+            task = await self.db.col("tasks").find_one({"_id": ObjectId(task_id)})
+            if not task:
+                await progress_callback("❌ Manual Run: Task not found.")
+                return
 
-        if not storage_channel:
-            await progress_callback("❌ Manual Run: Task needs a storage channel.")
-            return
+            storage_channel = fix_channel_id(task.get("storage_channel"))
+            destinations = [d for d in task.get("destinations", []) if d.get("status", "active") == "active"]
+            sources = [s for s in task.get("sources", []) if s.get("status", "active") == "active"]
 
-        saved = 0
-        source_error = None
-        updated_sources = list(task.get("sources", []))
-        if sources:
-            await progress_callback("🔄 Manual Run: Connecting to userbot...")
-            userbot = UserbotService(self.db, self.settings)
-            client = await userbot.client()
-            if not client:
-                source_error = "Userbot is not logged in or not configured"
-                await progress_callback("⚠️ Manual Run: Userbot not ready. Skipping collection.")
-            else:
+            if not storage_channel:
+                await progress_callback("❌ Manual Run: Task needs a storage channel.")
+                return
+
+            saved = 0
+            source_error = None
+            updated_sources = list(task.get("sources", []))
+            client = None
+            if sources or destinations:
+                await progress_callback("🔄 Manual Run: Connecting to userbot...")
+                userbot = UserbotService(self.db, self.settings)
+                client = await userbot.client()
+                if not client:
+                    source_error = "Userbot is not logged in or not configured"
+                    await progress_callback("⚠️ Manual Run: Userbot not ready.")
+
+            if sources and client:
                 await progress_callback(f"🔄 Manual Run: Scanning {len(sources)} sources...")
                 for idx, source in enumerate(updated_sources):
                     if source.get("status", "active") != "active":
@@ -322,44 +339,53 @@ class TaskScheduler:
                     {"$set": {"sources": updated_sources, "updated_at": utcnow()}}
                 )
 
-        posted = 0
-        posting_error = None
-        if destinations:
-            posts_per_interval = int(task.get("posts_per_interval") or 1)
-            await progress_callback(f"🔄 Manual Run: Posting up to {posts_per_interval} videos to {len(destinations)} destinations...")
-            try:
-                posted, post_errors = await self.post_stored_to_destinations(task, destinations, await self.db.get_runtime_settings(), posts_per_interval)
-                if post_errors:
-                    posting_error = "; ".join(post_errors)
-            except Exception as exc:
-                logger.exception("Manual post failed")
-                posting_error = str(exc)
-        else:
-            await progress_callback("⚠️ Manual Run: No active destinations configured.")
+            posted = 0
+            posting_error = None
+            if destinations:
+                posts_per_interval = int(task.get("posts_per_interval") or 1)
+                await progress_callback(f"🔄 Manual Run: Posting up to {posts_per_interval} videos to {len(destinations)} destinations...")
+                try:
+                    posted, post_errors = await self.post_stored_to_destinations(
+                        task,
+                        destinations,
+                        await self.db.get_runtime_settings(),
+                        posts_per_interval,
+                        client=client
+                    )
+                    if post_errors:
+                        posting_error = "; ".join(post_errors)
+                except Exception as exc:
+                    logger.exception("Manual post failed")
+                    posting_error = str(exc)
+            else:
+                await progress_callback("⚠️ Manual Run: No active destinations configured.")
 
-        last_error = posting_error or source_error
-        update_doc = {
-            "last_saved_count": saved,
-            "last_post_count": posted,
-            "last_run_at": utcnow(),
-            "last_error": last_error,
-            "updated_at": utcnow(),
-        }
-        await self.db.col("tasks").update_one({"_id": task["_id"]}, {"$set": update_doc})
+            last_error = posting_error or source_error
+            update_doc = {
+                "last_saved_count": saved,
+                "last_post_count": posted,
+                "last_run_at": utcnow(),
+                "last_error": last_error,
+                "updated_at": utcnow(),
+            }
+            await self.db.col("tasks").update_one({"_id": task["_id"]}, {"$set": update_doc})
 
-        if last_error:
-            await progress_callback(
-                f"⚠️ Manual Run Finished with issues.\n\n"
-                f"- Saved to storage: {saved} videos\n"
-                f"- Posted to destinations: {posted} videos\n"
-                f"- Error: {last_error}"
-            )
-        else:
-            await progress_callback(
-                f"✅ Manual Run Completed Successfully!\n\n"
-                f"- Saved to storage: {saved} videos\n"
-                f"- Posted to destinations: {posted} videos"
-            )
+            if last_error:
+                await progress_callback(
+                    f"⚠️ Manual Run Finished with issues.\n\n"
+                    f"- Saved to storage: {saved} videos\n"
+                    f"- Posted to destinations: {posted} videos\n"
+                    f"- Error: {last_error}"
+                )
+            else:
+                await progress_callback(
+                    f"✅ Manual Run Completed Successfully!\n\n"
+                    f"- Saved to storage: {saved} videos\n"
+                    f"- Posted to destinations: {posted} videos"
+                )
+        finally:
+            self._running_collect_task_ids.discard(task_id)
+            self._running_post_task_ids.discard(task_id)
 
     async def _collect_from_source(
         self,
@@ -566,31 +592,17 @@ class TaskScheduler:
             )
             return "failed_permanent"
 
-        thumb_bytes = await download_thumbnail_bytes(message)
-        thumbnail_file_id = None
-        if thumb_bytes:
-            try:
-                sent_thumb = await self.bot.send_photo(
-                    chat_id=int(storage_channel),
-                    photo=BufferedInputFile(thumb_bytes, filename="thumbnail.jpg"),
-                    caption=f"Thumbnail for video {token}"
-                )
-                if sent_thumb.photo:
-                    thumbnail_file_id = sent_thumb.photo[-1].file_id
-            except Exception as exc:
-                logger.warning("Failed to upload generated thumbnail to storage channel: %s", exc)
-
         await self.db.col("media").update_one(
             {"fingerprint": fingerprint},
             {
                 "$set": {
                     "storage_message_id": storage_message_id,
                     "storage_status": "stored",
-                    "thumbnail_file_id": thumbnail_file_id,
                     "updated_at": utcnow(),
                 },
                 "$unset": {
-                    "thumbnail_bytes": ""
+                    "thumbnail_bytes": "",
+                    "thumbnail_file_id": ""
                 }
             },
         )
@@ -613,6 +625,7 @@ class TaskScheduler:
         destinations: list[dict[str, Any]],
         runtime: dict[str, Any],
         limit: int,
+        client: Any | None = None,
     ) -> tuple[int, list[str]]:
         posted = 0
         all_errors: list[str] = []
@@ -633,7 +646,25 @@ class TaskScheduler:
             .limit(limit)
         )
         async for media in cursor:
-            attempted, errors = await self._post_destinations(media, destinations, media.get("thumbnail_file_id"), runtime)
+            thumb_bytes = None
+            if client:
+                storage_chat_id = media.get("storage_chat_id")
+                storage_message_id = media.get("storage_message_id")
+                if storage_chat_id and storage_message_id:
+                    try:
+                        msg = await client.get_messages(chat_ref(storage_chat_id), ids=storage_message_id)
+                        if msg:
+                            thumb_bytes = await download_thumbnail_bytes(msg)
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to download thumbnail on-the-fly for media %s from storage %s msg %s: %s",
+                            media.get("token"),
+                            storage_chat_id,
+                            storage_message_id,
+                            exc,
+                        )
+
+            attempted, errors = await self._post_destinations(media, destinations, thumb_bytes, runtime)
 
             if attempted > 0:
                 posted += 1
@@ -646,7 +677,7 @@ class TaskScheduler:
         self,
         media: dict[str, Any],
         destinations: list[dict[str, Any]],
-        thumb_file_id: str | None,
+        thumb_bytes: bytes | None,
         runtime: dict[str, Any],
     ) -> tuple[int, list[str]]:
         username = await self.bot_username()
@@ -680,10 +711,10 @@ class TaskScheduler:
                 )
                 continue
             try:
-                if thumb_file_id:
+                if thumb_bytes:
                     sent = await self.bot.send_photo(
                         chat_id=chat_id,
-                        photo=thumb_file_id,
+                        photo=BufferedInputFile(thumb_bytes, filename="thumbnail.jpg"),
                         caption=caption,
                         reply_markup=markup,
                         has_spoiler=True,
