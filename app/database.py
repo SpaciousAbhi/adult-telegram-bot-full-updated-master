@@ -183,3 +183,22 @@ class Database:
             {"$set": {"pending_action": action, "pending_action_at": utcnow()}},
             upsert=True,
         )
+
+    async def get_all_destinations(self) -> list[dict[str, Any]]:
+        destinations = []
+        seen = set()
+        cursor = self.col("tasks").find({})
+        async for task in cursor:
+            for dest in task.get("destinations") or []:
+                chat_id = dest.get("chat_id")
+                if chat_id and chat_id not in seen:
+                    seen.add(chat_id)
+                    link = dest.get("link")
+                    if not link and isinstance(chat_id, str) and chat_id.startswith("@"):
+                        link = f"https://t.me/{chat_id.lstrip('@')}"
+                    destinations.append({
+                        "chat_id": chat_id,
+                        "title": dest.get("title") or str(chat_id),
+                        "link": link
+                    })
+        return destinations

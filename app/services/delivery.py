@@ -56,7 +56,7 @@ class DeliveryService:
                 from_chat_id=chat_ref(storage_chat_id),
                 message_id=int(storage_message_id),
                 caption="@venom_stone_network",
-                reply_markup=keyboards.delivered_file_keyboard(runtime.get("destination_channels") or []),
+                reply_markup=keyboards.delivered_file_keyboard(await self.db.get_all_destinations()),
             )
         except (TelegramBadRequest, TelegramForbiddenError):
             await self.bot.send_message(chat_id, "I could not deliver this video. Please try again later.")

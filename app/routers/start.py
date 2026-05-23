@@ -63,8 +63,7 @@ async def send_user_entry(
         await DeliveryService(db, bot, settings).deliver(pending["token"], user_id, message.chat.id)
         return
 
-    runtime = await db.get_runtime_settings()
-    destinations = runtime.get("destination_channels") or []
+    destinations = await db.get_all_destinations()
 
     welcome_joined = format_welcome_message(destinations)
     await message.answer(
@@ -85,8 +84,7 @@ async def verify_force_subscription(query: CallbackQuery, db: Database, bot: Bot
         await DeliveryService(db, bot, settings).deliver(pending["token"], user_id, query.message.chat.id)
         return
         
-    runtime = await db.get_runtime_settings()
-    destinations = runtime.get("destination_channels") or []
+    destinations = await db.get_all_destinations()
     
     welcome_joined = format_welcome_message(destinations)
     try:
@@ -103,8 +101,7 @@ async def user_home_callback(query: CallbackQuery, db: Database, bot: Bot, setti
     await query.answer()
     user_id = query.from_user.id
     
-    runtime = await db.get_runtime_settings()
-    destinations = runtime.get("destination_channels") or []
+    destinations = await db.get_all_destinations()
     
     welcome_joined = format_welcome_message(destinations)
     try:

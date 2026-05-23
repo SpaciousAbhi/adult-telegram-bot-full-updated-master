@@ -21,6 +21,7 @@ class StartAndReferralTests(unittest.IsolatedAsyncioTestCase):
             ]
         }
         db.get_runtime_settings = AsyncMock(return_value=runtime)
+        db.get_all_destinations = AsyncMock(return_value=runtime["destination_channels"])
         db.get_user = AsyncMock(return_value={})
         db.set_pending_action = AsyncMock()
         
