@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import logging
 import os
 import tempfile
 from typing import Any
@@ -229,13 +230,44 @@ try:
 except ImportError:
     cv2 = None
 
+logger = logging.getLogger(__name__)
+
+
+def get_frame_quality(frame: Any) -> float:
+    try:
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        mean_brightness = gray.mean()
+        # Ensure average brightness is in a reasonable range (not black, not white)
+        if mean_brightness < 40 or mean_brightness > 220:
+            return 0.0
+        
+        # Blurriness: variance of the Laplacian (higher is sharper)
+        laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+        
+        # Contrast: standard deviation (higher is more contrasty/detailed)
+        std_dev = gray.std()
+        if std_dev < 15:
+            return 0.0
+            
+        return laplacian_var * std_dev
+    except Exception:
+        return 0.0
+
 
 async def download_thumbnail_bytes(message: Any) -> bytes | None:
-    # 1. If cv2 is available and the message is a video, try to extract a high-quality frame from it.
+    # 1. Try to generate a high quality frame from the video using OpenCV
     if cv2 is not None and message_has_video(message):
         try:
             client = getattr(message, "_client", None)
             if client:
+                # Determine how much to download.
+                # If the video size is < 25MB, download it completely.
+                # Otherwise, download the first 15MB.
+                max_bytes = 15 * 1024 * 1024
+                doc_size = getattr(getattr(message, "document", None), "size", 0) or 0
+                if isinstance(doc_size, int) and doc_size > 0 and doc_size < 25 * 1024 * 1024:
+                    max_bytes = doc_size
+                
                 fd, temp_path = tempfile.mkstemp(suffix=".mp4")
                 try:
                     downloaded_bytes = 0
@@ -243,69 +275,91 @@ async def download_thumbnail_bytes(message: Any) -> bytes | None:
                         async for chunk in client.iter_download(message.media, chunk_size=256 * 1024):
                             f.write(chunk)
                             downloaded_bytes += len(chunk)
-                            # 3MB is usually enough to decode the header and get the first few keyframes
-                            if downloaded_bytes >= 3 * 1024 * 1024:
+                            if downloaded_bytes >= max_bytes:
                                 break
                     
                     if downloaded_bytes > 0:
                         cap = cv2.VideoCapture(temp_path)
                         if cap.isOpened():
                             best_frame = None
+                            best_score = -1.0
+                            fallback_frame = None
                             frame_idx = 0
                             success, frame = cap.read()
-                            # Search the first 100 frames to find a non-black/non-dark frame (brightness > 15)
-                            while success and frame_idx < 100:
-                                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                                avg_brightness = gray.mean()
-                                if avg_brightness > 15:
-                                    best_frame = frame
-                                    break
-                                if best_frame is None:
-                                    best_frame = frame
+                            
+                            # Read up to 150 frames to find the best quality one
+                            while success and frame_idx < 150:
+                                if fallback_frame is None:
+                                    fallback_frame = frame.copy()
+                                
+                                # Skip first 10 frames to avoid initial black screens or logo transitions
+                                if frame_idx >= 10:
+                                    score = get_frame_quality(frame)
+                                    if score > best_score:
+                                        best_score = score
+                                        best_frame = frame.copy()
+                                
                                 success, frame = cap.read()
                                 frame_idx += 1
+                                
                             cap.release()
-
-                            if best_frame is not None:
-                                success, encoded_image = cv2.imencode(".jpg", best_frame)
+                            
+                            final_frame = best_frame if best_frame is not None else fallback_frame
+                            if final_frame is not None:
+                                # Encode to JPEG with high quality (95)
+                                success, encoded_image = cv2.imencode(
+                                    ".jpg", 
+                                    final_frame, 
+                                    [int(cv2.IMWRITE_JPEG_QUALITY), 95]
+                                )
                                 if success:
+                                    logger.info(
+                                        "Successfully extracted high-quality frame from video. Quality score: %s", 
+                                        best_score
+                                    )
                                     return encoded_image.tobytes()
                 finally:
                     try:
                         os.unlink(temp_path)
                     except Exception:
                         pass
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to extract frame using OpenCV: %s. Falling back to Telegram thumbs.", exc)
 
-    # 2. Fallback to the best quality thumbnail provided by Telegram.
+    # 2. Fallback: Download the highest quality thumbnail provided by Telegram (excluding stripped/empty sizes)
     try:
-        thumb_to_download: Any = 0
         document = getattr(message, "document", None)
         thumbs = getattr(document, "thumbs", None) if document else None
         if not thumbs:
             photo = getattr(message, "photo", None)
             thumbs = getattr(photo, "sizes", None) if photo else None
 
+        thumb_to_download: Any = 0
         if thumbs:
-            def get_thumb_score(t: Any) -> int:
-                w = getattr(t, "w", 0) or 0
-                h = getattr(t, "h", 0) or 0
-                size = getattr(t, "size", 0) or 0
-                if not size and hasattr(t, "bytes"):
-                    size = len(getattr(t, "bytes") or b"")
-                return w * h or size
+            # Filter out non-downloadable stripped thumbnails
+            downloadable_thumbs = [
+                t for t in thumbs 
+                if t and type(t).__name__ not in ("PhotoStrippedSize", "PhotoSizeEmpty")
+            ]
+            if downloadable_thumbs:
+                # Choose the one with the largest resolution area
+                def get_thumb_score(t: Any) -> int:
+                    w = getattr(t, "w", 0) or 0
+                    h = getattr(t, "h", 0) or 0
+                    return w * h
 
-            valid_thumbs = [t for t in thumbs if t]
-            if valid_thumbs:
-                thumb_to_download = max(valid_thumbs, key=get_thumb_score)
+                thumb_to_download = max(downloadable_thumbs, key=get_thumb_score)
 
         buffer = io.BytesIO()
         result = await message.download_media(file=buffer, thumb=thumb_to_download)
-        if result is None:
-            return None
-        return buffer.getvalue() or None
-    except Exception:
-        return None
+        if result is not None:
+            logger.info("Successfully downloaded Telegram fallback thumbnail")
+            return buffer.getvalue() or None
+    except Exception as exc:
+        logger.exception("Failed to download fallback Telegram thumbnail: %s", exc)
+
+    return None
+
+
 
 

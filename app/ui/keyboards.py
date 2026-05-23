@@ -77,10 +77,11 @@ def task_detail_keyboard(task: dict[str, Any]) -> InlineKeyboardMarkup:
         [btn("📦 Storage Channel", cb("task", "storage", task_id)), btn("❌ Remove Storage", cb("task", "clearstorage", task_id))],
         [btn("⏱️ Set Interval", cb("task", "interval", task_id)), btn("🔢 Set Amount", cb("task", "amount", task_id))],
     ]
-    if status == "active":
+    if status not in {"paused", "draft"}:
         rows.append([btn("⏸️ Pause Auto-Posting", cb("task", "pause", task_id))])
     else:
         rows.append([btn("▶️ Start Auto-Posting", cb("task", "resume", task_id))])
+
     rows.append([btn("⚡ Run Now", cb("task", "runnow", task_id)), btn("🔄 Refresh", cb("task", "open", task_id))])
     rows.append([btn("◀️ Back to Tasks", TASKS_HOME)])
     return mk(rows)

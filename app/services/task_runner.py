@@ -12,6 +12,11 @@ from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import BufferedInputFile, InlineKeyboardButton, InlineKeyboardMarkup
 from pymongo.errors import DuplicateKeyError
 
+try:
+    from telethon.errors import FloodWaitError
+except ImportError:
+    FloodWaitError = Exception
+
 from app.config import Settings
 from app.database import Database
 from app.services.userbot import (
@@ -77,6 +82,23 @@ class TaskScheduler:
         async for task in cursor:
             scanned += 1
             status = task.get("status", "draft")
+
+            if status == "cooldown":
+                cooldown_until = task.get("cooldown_until")
+                if cooldown_until and now >= cooldown_until:
+                    status = "queued"
+                    await self.db.col("tasks").update_one(
+                        {"_id": task["_id"]},
+                        {"$set": {"status": "queued", "cooldown_until": None, "updated_at": now}}
+                    )
+                else:
+                    logger.info("task_scheduler_skip task_id=%s reason=cooldown_active", task.get("_id"))
+                    continue
+
+            if status in {"paused", "draft"}:
+                logger.info("task_scheduler_skip task_id=%s reason=status_%s", task.get("_id"), status)
+                continue
+
             post_due = self._is_due(task.get("next_run_at"), now)
             collect_due = self._is_due(task.get("next_collect_at"), now)
             logger.info(
@@ -90,12 +112,6 @@ class TaskScheduler:
                 post_due,
                 collect_due,
             )
-            if status != ACTIVE_TASK:
-                logger.info("task_scheduler_skip task_id=%s reason=status_%s", task.get("_id"), status)
-                continue
-            if not post_due and not collect_due:
-                logger.info("task_scheduler_skip task_id=%s reason=not_due", task.get("_id"))
-                continue
 
             task_id = str(task["_id"])
             is_collecting = task_id in self._running_collect_task_ids
@@ -131,6 +147,7 @@ class TaskScheduler:
 
         logger.info("task_scheduler_tick_complete scanned=%s due=%s now=%s", scanned, due, compact_dt(now))
 
+
     async def _execute_task_bg(self, task_id: str, run_collect: bool, run_post: bool) -> None:
         try:
             task = await self.db.col("tasks").find_one({"_id": ObjectId(task_id)})
@@ -162,6 +179,11 @@ class TaskScheduler:
         source_error = None
         updated_sources = list(task.get("sources", []))
         if run_collect and sources:
+            # Set status to collecting when collection starts
+            await self.db.col("tasks").update_one(
+                {"_id": task_id},
+                {"$set": {"status": "collecting", "updated_at": utcnow()}}
+            )
             userbot = UserbotService(self.db, self.settings)
             client = await userbot.client()
             if not client:
@@ -203,19 +225,31 @@ class TaskScheduler:
                 logger.exception("task_post_destinations_error task_id=%s", task_id)
                 posting_error = str(exc)
 
+        # Retrieve the latest task document to preserve cooldown/paused/draft state
+        latest_task = await self.db.col("tasks").find_one({"_id": task_id})
+        current_status = latest_task.get("status") if latest_task else "queued"
+
         last_error = posting_error or source_error
         update_doc: dict[str, Any] = {
             "last_run_at": utcnow(),
             "updated_at": utcnow(),
+            "last_error": last_error,
         }
-        update_doc["last_error"] = last_error
-
         if run_collect:
             update_doc["last_saved_count"] = saved
         if run_post:
             update_doc["last_post_count"] = posted
 
+        if current_status not in ("cooldown", "paused", "draft"):
+            if last_error:
+                update_doc["status"] = "failed"
+            elif run_collect and saved == 0:
+                update_doc["status"] = "completed"
+            else:
+                update_doc["status"] = "queued"
+
         await self.db.col("tasks").update_one({"_id": task_id}, {"$set": update_doc})
+
 
     def _is_due(self, value: Any, now: Any) -> bool:
         if value is None:
@@ -381,13 +415,33 @@ class TaskScheduler:
                         await asyncio.sleep(self.settings.source_collect_sleep_seconds)
                 elif result == "duplicate":
                     duplicates += 1
+                elif result == "failed_permanent":
+                    pass
                 else:
                     failed += 1
+        except FloodWaitError as exc:
+            cooldown_seconds = exc.seconds + 5
+            cooldown_until = utcnow() + timedelta(seconds=cooldown_seconds)
+            await self.db.col("tasks").update_one(
+                {"_id": task["_id"]},
+                {
+                    "$set": {
+                        "status": "cooldown",
+                        "cooldown_until": cooldown_until,
+                        "last_error": f"Telegram Rate Limit: Cooldown for {cooldown_seconds}s",
+                        "updated_at": utcnow()
+                    }
+                }
+            )
+            logger.warning("FloodWaitError hit on task %s: cooling down for %s seconds", task.get("_id"), cooldown_seconds)
+            failed += 1
+            raise exc
         except Exception as exc:
             source["last_error"] = f"Source scan failed: {exc}"
             source["last_checked_at"] = utcnow()
             logger.exception("task_source_scan_failed task_id=%s source=%r", task.get("_id"), raw)
             return count
+
         if failed == 0:
             source["last_message_id"] = max_seen
         else:
@@ -459,6 +513,13 @@ class TaskScheduler:
                 await self.db.col("media").insert_one(media_doc)
             except DuplicateKeyError:
                 return "duplicate"
+
+        # Update status to uploading before forwarding to storage
+        await self.db.col("tasks").update_one(
+            {"_id": task["_id"]},
+            {"$set": {"status": "uploading", "updated_at": utcnow()}}
+        )
+
         try:
             forwarded = await client.forward_messages(
                 entity=chat_ref(storage_channel),
@@ -466,6 +527,8 @@ class TaskScheduler:
                 from_peer=source_raw,
                 drop_author=not bool(runtime.get("forward_tag_enabled")),
             )
+        except FloodWaitError as exc:
+            raise exc
         except Exception as exc:
             await self.db.col("media").update_one(
                 {"fingerprint": fingerprint},
@@ -479,7 +542,15 @@ class TaskScheduler:
                 storage_channel,
                 fingerprint,
             )
-            return "failed"
+            return "failed_permanent"
+        finally:
+            # Revert status back to collecting, unless it was set to cooldown
+            latest_task = await self.db.col("tasks").find_one({"_id": task["_id"]})
+            if latest_task and latest_task.get("status") != "cooldown":
+                await self.db.col("tasks").update_one(
+                    {"_id": task["_id"]},
+                    {"$set": {"status": "collecting", "updated_at": utcnow()}}
+                )
 
         storage_message_id = int(getattr(forwarded, "id", 0) or 0)
         if not storage_message_id:
@@ -493,7 +564,7 @@ class TaskScheduler:
                 source_raw,
                 getattr(message, "id", None),
             )
-            return "failed"
+            return "failed_permanent"
 
         thumb_bytes = await download_thumbnail_bytes(message)
         await self.db.col("media").update_one(
@@ -517,6 +588,7 @@ class TaskScheduler:
             token,
         )
         return "saved"
+
 
     async def post_stored_to_destinations(
         self,
