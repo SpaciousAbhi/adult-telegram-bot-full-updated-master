@@ -4,20 +4,20 @@ from bson import ObjectId
 from app.services.task_runner import TaskScheduler
 
 class PostingPipelineTests(unittest.IsolatedAsyncioTestCase):
-    async def test_destination_posting_uses_thumbnail_bytes(self):
+    async def test_destination_posting_uses_thumbnail_file_id(self):
         db = MagicMock()
         settings = MagicMock()
         bot = AsyncMock()
         
         scheduler = TaskScheduler(db, settings, bot)
         
-        fake_thumbnail_bytes = b"fake_jpeg_image_bytes"
+        fake_file_id = "AgACAgIAAxkBAAECBAFm..."
         media_doc = {
             "_id": ObjectId("60c72b2f9b1d8b2bad000005"),
             "token": "testtoken123",
             "fingerprint": "testfingerprint",
             "storage_message_id": 12345,
-            "thumbnail_bytes": fake_thumbnail_bytes,
+            "thumbnail_file_id": fake_file_id,
             "posted_destination_chat_ids": []
         }
         
@@ -51,9 +51,8 @@ class PostingPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call_kwargs["chat_id"], -100987654321)
         self.assertEqual(call_kwargs["has_spoiler"], True)
         
-        photo_file = call_kwargs["photo"]
-        self.assertEqual(photo_file.data, fake_thumbnail_bytes)
-        self.assertEqual(photo_file.filename, "thumbnail.jpg")
+        self.assertEqual(call_kwargs["photo"], fake_file_id)
+
 
 if __name__ == "__main__":
     unittest.main()

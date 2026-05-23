@@ -567,17 +567,34 @@ class TaskScheduler:
             return "failed_permanent"
 
         thumb_bytes = await download_thumbnail_bytes(message)
+        thumbnail_file_id = None
+        if thumb_bytes:
+            try:
+                sent_thumb = await self.bot.send_photo(
+                    chat_id=int(storage_channel),
+                    photo=BufferedInputFile(thumb_bytes, filename="thumbnail.jpg"),
+                    caption=f"Thumbnail for video {token}"
+                )
+                if sent_thumb.photo:
+                    thumbnail_file_id = sent_thumb.photo[-1].file_id
+            except Exception as exc:
+                logger.warning("Failed to upload generated thumbnail to storage channel: %s", exc)
+
         await self.db.col("media").update_one(
             {"fingerprint": fingerprint},
             {
                 "$set": {
                     "storage_message_id": storage_message_id,
                     "storage_status": "stored",
-                    "thumbnail_bytes": thumb_bytes,
+                    "thumbnail_file_id": thumbnail_file_id,
                     "updated_at": utcnow(),
+                },
+                "$unset": {
+                    "thumbnail_bytes": ""
                 }
             },
         )
+
         logger.info(
             "task_storage_saved task_id=%s source=%r source_message_id=%s storage_channel=%s storage_message_id=%s token=%s",
             task.get("_id"),
@@ -616,7 +633,8 @@ class TaskScheduler:
             .limit(limit)
         )
         async for media in cursor:
-            attempted, errors = await self._post_destinations(media, destinations, media.get("thumbnail_bytes"), runtime)
+            attempted, errors = await self._post_destinations(media, destinations, media.get("thumbnail_file_id"), runtime)
+
             if attempted > 0:
                 posted += 1
             if errors:
@@ -628,7 +646,7 @@ class TaskScheduler:
         self,
         media: dict[str, Any],
         destinations: list[dict[str, Any]],
-        thumb_bytes: bytes | None,
+        thumb_file_id: str | None,
         runtime: dict[str, Any],
     ) -> tuple[int, list[str]]:
         username = await self.bot_username()
@@ -662,10 +680,10 @@ class TaskScheduler:
                 )
                 continue
             try:
-                if thumb_bytes:
+                if thumb_file_id:
                     sent = await self.bot.send_photo(
                         chat_id=chat_id,
-                        photo=BufferedInputFile(thumb_bytes, filename="thumbnail.jpg"),
+                        photo=thumb_file_id,
                         caption=caption,
                         reply_markup=markup,
                         has_spoiler=True,
