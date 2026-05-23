@@ -41,10 +41,13 @@ class StartAndReferralTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Welcome to the Premium Bot!", args[0])
             self.assertIn("Here are our free content channels you can join:", args[0])
             
-            # The keyboard should only have the unjoined channel button and the referral button (no Verify Access)
+            # The keyboard should have all configured channels (Joined and Unjoined) and the referral button
             reply_markup = kwargs["reply_markup"]
-            self.assertEqual(len(reply_markup.inline_keyboard), 2) # Unjoined channel, Referral Program
-            unjoined_btn = reply_markup.inline_keyboard[0][0]
+            self.assertEqual(len(reply_markup.inline_keyboard), 3) # Joined channel, Unjoined channel, Referral Program
+            joined_btn = reply_markup.inline_keyboard[0][0]
+            unjoined_btn = reply_markup.inline_keyboard[1][0]
+            self.assertEqual(joined_btn.text, "📢 Join: Joined Channel")
+            self.assertEqual(joined_btn.url, "https://t.me/joined")
             self.assertEqual(unjoined_btn.text, "📢 Join: Unjoined Channel")
             self.assertEqual(unjoined_btn.url, "https://t.me/unjoined")
 

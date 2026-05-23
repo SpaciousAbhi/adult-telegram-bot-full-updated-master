@@ -207,13 +207,14 @@ def user_unjoined_destinations_keyboard(missing_dests: list[dict[str, Any]]) -> 
 
 
 def delivered_file_keyboard(destinations: list[dict[str, Any]]) -> InlineKeyboardMarkup:
-    rows: list[list[InlineKeyboardButton]] = []
+    rows: list[list[InlineKeyboardButton]] = [
+        [btn("👥 Referral Program", "user_referral")]
+    ]
     for dest in destinations:
         title = dest.get("title") or f"Channel {dest.get('chat_id')}"
         link = dest.get("link")
         if link:
             rows.append([url_btn(f"📢 Join: {title[:25]}", link)])
-    rows.append([btn("👥 Referral Program", "user_referral")])
     return mk(rows)
 
 

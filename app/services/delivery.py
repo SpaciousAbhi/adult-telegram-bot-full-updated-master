@@ -79,27 +79,38 @@ class DeliveryService:
         methods = ", ".join(access.get("premium_methods") or ["UPI", "Crypto", "Binance"])
         referral_link = await ReferralService(self.db, self.bot).get_or_create_link(user_id)
         referral = runtime.get("referral") or {}
+        
         referral_text = ""
         if referral_link:
             referral_text = (
-                "\n\n👥 <b>Referral Promotion:</b>\n"
-                f"Invite <code>{referral.get('required_joins', 10)}</code> friends to join our sponsor channels, "
-                f"and unlock <b>{referral.get('reward_limit', 100)} daily downloads</b> for "
-                f"<b>{referral.get('reward_days', 5)} days</b>!"
+                "\n\n⚡ <b>UNLIMITED CONTENT WITH REFERRALS!</b>\n"
+                "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
+                "Don't want to buy Premium? You can get it for <b>FREE</b>!\n\n"
+                "👥 <b>Invite your friends:</b>\n"
+                f"Share your personal link and get <b>{referral.get('required_joins', 10)} friends</b> to join our channels.\n\n"
+                f"🎁 <b>Your Reward:</b>\n"
+                f"Get upgraded to a massive limit of <b>{referral.get('reward_limit', 100)} daily downloads</b> for <b>{referral.get('reward_days', 5)} full days</b> completely free!"
             )
+        else:
+            referral_text = (
+                "\n\n👥 <b>Referral Program:</b>\n"
+                "Invite friends to upgrade your daily limit. (Disabled by admin)"
+            )
+            
         admin_id = self.settings.primary_admin_id if self.settings else chat_id
         rows = [[InlineKeyboardButton(text="💎 Contact Admin to Buy Premium", url=f"tg://user?id={admin_id}")]]
         if referral_link:
             rows.append([InlineKeyboardButton(text="👥 Refer Friends & Earn Premium", url=referral_link)])
+            
         await self.bot.send_message(
             chat_id,
             "⚠️ <b>Daily Download Limit Reached</b>\n"
-            "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
+            "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
             f"{message}\n\n"
             f"• 📊 <b>Your daily limit:</b> <code>{limit}</code> downloads\n"
             f"• 💳 <b>Payment methods:</b> <code>{methods}</code>"
             f"{referral_text}\n"
-            "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬",
+            "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
         )
 

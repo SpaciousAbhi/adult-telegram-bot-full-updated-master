@@ -41,18 +41,11 @@ async def start_command(
 
 
 def format_welcome_message(missing_dests: list[dict[str, Any]]) -> str:
-    if missing_dests:
-        return (
-            "✨ <b>Welcome to the Premium Bot!</b> 👋\n"
-            "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
-            "Enjoy access to all the free channels where premium videos and files are being uploaded daily.\n\n"
-            "📥 <b>Here are our free content channels you can join:</b>"
-        )
     return (
         "✨ <b>Welcome to the Premium Bot!</b> 👋\n"
-        "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
+        "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
         "Enjoy access to all the free channels where premium videos and files are being uploaded daily.\n\n"
-        "✅ <b>You have joined all our free content channels!</b> Keep enjoying the daily uploads."
+        "📥 <b>Here are our free content channels you can join:</b>"
     )
 
 
@@ -63,16 +56,6 @@ async def send_user_entry(
     settings: Settings,
     user_id: int,
 ) -> None:
-    force_service = ForceSubscriptionService(db, bot)
-    missing_force = await force_service.missing_targets(user_id)
-    
-    if missing_force:
-        await message.answer(
-            text.force_required(missing_force),
-            reply_markup=keyboards.force_user_keyboard(missing_force)
-        )
-        return
-
     user = await db.get_user(user_id) or {}
     pending = user.get("pending_action") or {}
     if pending.get("type") == "deliver" and pending.get("token"):
@@ -82,12 +65,11 @@ async def send_user_entry(
 
     runtime = await db.get_runtime_settings()
     destinations = runtime.get("destination_channels") or []
-    missing_dests = await force_service.missing_destinations(user_id, destinations)
 
-    welcome_joined = format_welcome_message(missing_dests)
+    welcome_joined = format_welcome_message(destinations)
     await message.answer(
         welcome_joined,
-        reply_markup=keyboards.user_unjoined_destinations_keyboard(missing_dests)
+        reply_markup=keyboards.user_unjoined_destinations_keyboard(destinations)
     )
 
 
@@ -95,19 +77,7 @@ async def send_user_entry(
 async def verify_force_subscription(query: CallbackQuery, db: Database, bot: Bot, settings: Settings) -> None:
     await query.answer("Checking access...")
     user_id = query.from_user.id
-    force_service = ForceSubscriptionService(db, bot)
-    missing_force = await force_service.missing_targets(user_id)
     
-    if missing_force:
-        try:
-            await query.message.edit_text(
-                text.force_required(missing_force),
-                reply_markup=keyboards.force_user_keyboard(missing_force),
-            )
-        except Exception:
-            pass
-        return
-
     user = await db.get_user(user_id) or {}
     pending = user.get("pending_action") or {}
     await db.set_pending_action(user_id, None)
@@ -117,13 +87,12 @@ async def verify_force_subscription(query: CallbackQuery, db: Database, bot: Bot
         
     runtime = await db.get_runtime_settings()
     destinations = runtime.get("destination_channels") or []
-    missing_dests = await force_service.missing_destinations(user_id, destinations)
     
-    welcome_joined = format_welcome_message(missing_dests)
+    welcome_joined = format_welcome_message(destinations)
     try:
         await query.message.edit_text(
             welcome_joined, 
-            reply_markup=keyboards.user_unjoined_destinations_keyboard(missing_dests)
+            reply_markup=keyboards.user_unjoined_destinations_keyboard(destinations)
         )
     except Exception:
         pass
@@ -133,28 +102,15 @@ async def verify_force_subscription(query: CallbackQuery, db: Database, bot: Bot
 async def user_home_callback(query: CallbackQuery, db: Database, bot: Bot, settings: Settings) -> None:
     await query.answer()
     user_id = query.from_user.id
-    force_service = ForceSubscriptionService(db, bot)
-    missing_force = await force_service.missing_targets(user_id)
     
-    if missing_force:
-        try:
-            await query.message.edit_text(
-                text.force_required(missing_force),
-                reply_markup=keyboards.force_user_keyboard(missing_force),
-            )
-        except Exception:
-            pass
-        return
-        
     runtime = await db.get_runtime_settings()
     destinations = runtime.get("destination_channels") or []
-    missing_dests = await force_service.missing_destinations(user_id, destinations)
     
-    welcome_joined = format_welcome_message(missing_dests)
+    welcome_joined = format_welcome_message(destinations)
     try:
         await query.message.edit_text(
             welcome_joined, 
-            reply_markup=keyboards.user_unjoined_destinations_keyboard(missing_dests)
+            reply_markup=keyboards.user_unjoined_destinations_keyboard(destinations)
         )
     except Exception:
         pass
@@ -205,7 +161,7 @@ async def send_referral_details(
     if not referral_link:
         msg_text = (
             "👥 <b>Referral Program</b>\n"
-            "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
+            "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
             "⚠️ The referral program is currently disabled by the administrator (no referral channel is set)."
         )
         markup = keyboards.mk([[keyboards.btn("◀️ Back", "user_home")]])
@@ -216,7 +172,7 @@ async def send_referral_details(
         
         msg_text = (
             "👥 <b>Bot Referral Program</b>\n"
-            "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
+            "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
             "Invite your friends using your personal link and unlock <b>Premium access</b>!\n\n"
             "ℹ️ <b>How it works:</b>\n"
             "1. Share your invite link with your friends.\n"
@@ -227,7 +183,7 @@ async def send_referral_details(
             f"• <b>Status:</b> {status_text}\n\n"
             "🔗 <b>Your Invite Link:</b>\n"
             f"<code>{referral_link}</code>\n"
-            "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬"
+            "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬"
         )
         
         markup = keyboards.mk([
