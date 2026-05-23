@@ -38,6 +38,7 @@ class TaskScheduler:
         self.db = db
         self.settings = settings
         self.bot = bot
+        self.userbot = UserbotService(db, settings)
         self._tasks: list[asyncio.Task[Any]] = []
         self._bot_username: str | None = None
         self._running_collect_task_ids: set[str] = set()
@@ -59,6 +60,7 @@ class TaskScheduler:
         for task in self._tasks:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
+        await self.userbot.disconnect()
 
     async def bot_username(self) -> str:
         if not self._bot_username:
@@ -86,10 +88,10 @@ class TaskScheduler:
             if status == "cooldown":
                 cooldown_until = task.get("cooldown_until")
                 if cooldown_until and now >= cooldown_until:
-                    status = "queued"
+                    status = "active"
                     await self.db.col("tasks").update_one(
                         {"_id": task["_id"]},
-                        {"$set": {"status": "queued", "cooldown_until": None, "updated_at": now}}
+                        {"$set": {"status": "active", "cooldown_until": None, "updated_at": now}}
                     )
                 else:
                     logger.info("task_scheduler_skip task_id=%s reason=cooldown_active", task.get("_id"))
@@ -180,17 +182,11 @@ class TaskScheduler:
         updated_sources = list(task.get("sources", []))
         client = None
         if (run_collect and sources) or (run_post and destinations):
-            userbot = UserbotService(self.db, self.settings)
-            client = await userbot.client()
+            client = await self.userbot.client()
             if not client:
                 source_error = "Userbot is not logged in or not configured"
 
         if run_collect and sources and client:
-            # Set status to collecting when collection starts
-            await self.db.col("tasks").update_one(
-                {"_id": task_id},
-                {"$set": {"status": "collecting", "updated_at": utcnow()}}
-            )
             for source in updated_sources:
                 if source.get("status", "active") != "active":
                     continue
@@ -249,12 +245,7 @@ class TaskScheduler:
             update_doc["last_post_count"] = posted
 
         if current_status not in ("cooldown", "paused", "draft"):
-            if last_error:
-                update_doc["status"] = "failed"
-            elif run_collect and saved == 0:
-                update_doc["status"] = "completed"
-            else:
-                update_doc["status"] = "queued"
+            update_doc["status"] = "active"
 
         await self.db.col("tasks").update_one({"_id": task_id}, {"$set": update_doc})
 
@@ -308,8 +299,7 @@ class TaskScheduler:
             client = None
             if sources or destinations:
                 await progress_callback("🔄 Manual Run: Connecting to userbot...")
-                userbot = UserbotService(self.db, self.settings)
-                client = await userbot.client()
+                client = await self.userbot.client()
                 if not client:
                     source_error = "Userbot is not logged in or not configured"
                     await progress_callback("⚠️ Manual Run: Userbot not ready.")
@@ -540,12 +530,6 @@ class TaskScheduler:
             except DuplicateKeyError:
                 return "duplicate"
 
-        # Update status to uploading before forwarding to storage
-        await self.db.col("tasks").update_one(
-            {"_id": task["_id"]},
-            {"$set": {"status": "uploading", "updated_at": utcnow()}}
-        )
-
         try:
             forwarded = await client.forward_messages(
                 entity=chat_ref(storage_channel),
@@ -569,14 +553,6 @@ class TaskScheduler:
                 fingerprint,
             )
             return "failed_permanent"
-        finally:
-            # Revert status back to collecting, unless it was set to cooldown
-            latest_task = await self.db.col("tasks").find_one({"_id": task["_id"]})
-            if latest_task and latest_task.get("status") != "cooldown":
-                await self.db.col("tasks").update_one(
-                    {"_id": task["_id"]},
-                    {"$set": {"status": "collecting", "updated_at": utcnow()}}
-                )
 
         storage_message_id = int(getattr(forwarded, "id", 0) or 0)
         if not storage_message_id:

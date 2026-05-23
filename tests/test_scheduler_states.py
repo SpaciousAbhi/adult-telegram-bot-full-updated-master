@@ -47,7 +47,7 @@ class SchedulerStateTests(unittest.IsolatedAsyncioTestCase):
                 
                 db.col.return_value.update_one.assert_any_call(
                     {"_id": task_expired["_id"]},
-                    {"$set": {"status": "queued", "cooldown_until": None, "updated_at": now}}
+                    {"$set": {"status": "active", "cooldown_until": None, "updated_at": now}}
                 )
                 
                 for call in db.col.return_value.update_one.call_args_list:

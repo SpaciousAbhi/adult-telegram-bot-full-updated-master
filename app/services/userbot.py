@@ -28,6 +28,16 @@ class UserbotService:
         self.db = db
         self.settings = settings
         self._client: Any | None = None
+        self._active_session_string: str | None = None
+
+    async def disconnect(self) -> None:
+        if self._client:
+            try:
+                await self._client.disconnect()
+            except Exception:
+                pass
+            self._client = None
+            self._active_session_string = None
 
     async def session_doc(self) -> dict[str, Any]:
         return await self.db.col("userbot").find_one({"_id": "default"}) or {}
@@ -169,10 +179,28 @@ class UserbotService:
         doc = await self.session_doc()
         session_string = doc.get("session_string")
         if not session_string:
+            if self._client:
+                try:
+                    await self._client.disconnect()
+                except Exception:
+                    pass
+                self._client = None
+                self._active_session_string = None
             await self._set_error("Userbot session is not logged in")
             return None
+
+        # If session changed, disconnect old client first
+        if self._client and self._active_session_string != session_string:
+            try:
+                await self._client.disconnect()
+            except Exception:
+                pass
+            self._client = None
+            self._active_session_string = None
+
         if self._client and self._client.is_connected():
             return self._client
+
         try:
             client = TelegramClient(StringSession(session_string), api_id, api_hash)
             await client.connect()
@@ -180,6 +208,7 @@ class UserbotService:
                 await self._set_error("Saved userbot session is not authorized")
                 return None
             self._client = client
+            self._active_session_string = session_string
             await self._set_error(None)
             return client
         except (ConfigError, RPCError, OSError) as exc:

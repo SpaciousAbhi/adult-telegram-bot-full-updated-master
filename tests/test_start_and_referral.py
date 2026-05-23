@@ -35,17 +35,17 @@ class StartAndReferralTests(unittest.IsolatedAsyncioTestCase):
             
             await send_user_entry(message, db, bot, settings, user_id=12345)
             
-            # Since the user hasn't joined -100222222, they should get the force subscription welcome text
+            # Since the user hasn't joined -100222222, they should get the unjoined destinations welcome text
             message.answer.assert_called_once()
             args, kwargs = message.answer.call_args
-            self.assertIn("Welcome to the Bot!", args[0])
-            self.assertIn("Only channels you haven't joined yet are shown:", args[0])
+            self.assertIn("Welcome to the Premium Bot!", args[0])
+            self.assertIn("Here are our free content channels you can join:", args[0])
             
-            # The keyboard should only have the unjoined channel button
+            # The keyboard should only have the unjoined channel button and the referral button (no Verify Access)
             reply_markup = kwargs["reply_markup"]
-            self.assertEqual(len(reply_markup.inline_keyboard), 3) # Unjoined channel, Verify Access, Referral Program
+            self.assertEqual(len(reply_markup.inline_keyboard), 2) # Unjoined channel, Referral Program
             unjoined_btn = reply_markup.inline_keyboard[0][0]
-            self.assertEqual(unjoined_btn.text, "Join Channel: Unjoined Channel")
+            self.assertEqual(unjoined_btn.text, "📢 Join: Unjoined Channel")
             self.assertEqual(unjoined_btn.url, "https://t.me/unjoined")
 
     async def test_send_referral_details_renders_proper_stats(self):

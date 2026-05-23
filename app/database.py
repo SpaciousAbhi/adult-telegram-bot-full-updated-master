@@ -115,6 +115,11 @@ class Database:
             {"$setOnInsert": {"_id": "default", "session_string": None, "phone": None, "updated_at": utcnow()}},
             upsert=True,
         )
+        # Migrate legacy task statuses to active
+        await self.col("tasks").update_many(
+            {"status": {"$in": ["completed", "queued", "failed", "collecting", "uploading"]}},
+            {"$set": {"status": "active", "updated_at": utcnow()}}
+        )
 
     async def get_runtime_settings(self) -> dict[str, Any]:
         doc = await self.col("settings").find_one({"key": "runtime"}) or {}

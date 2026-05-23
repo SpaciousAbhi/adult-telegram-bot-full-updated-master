@@ -40,6 +40,20 @@ async def start_command(
     await send_user_entry(message, db, bot, settings, user_id=message.from_user.id)
 
 
+def format_welcome_message(missing_dests: list[dict[str, Any]]) -> str:
+    if missing_dests:
+        return (
+            "Welcome to the Premium Bot! 👋\n\n"
+            "Enjoy access to all the free channels where premium videos and files are being uploaded daily.\n\n"
+            "Here are our free content channels you can join:"
+        )
+    return (
+        "Welcome to the Premium Bot! 👋\n\n"
+        "Enjoy access to all the free channels where premium videos and files are being uploaded daily.\n\n"
+        "You have joined all our free content channels! Keep enjoying the daily uploads."
+    )
+
+
 async def send_user_entry(
     message: Message,
     db: Database,
@@ -50,31 +64,14 @@ async def send_user_entry(
     force_service = ForceSubscriptionService(db, bot)
     missing_force = await force_service.missing_targets(user_id)
     
-    runtime = await db.get_runtime_settings()
-    destinations = runtime.get("destination_channels") or []
-    missing_dests = await force_service.missing_destinations(user_id, destinations)
-    
-    mapped_dests = []
-    for d in missing_dests:
-        mapped_dests.append({
-            "chat_id": d["chat_id"],
-            "title": d.get("title") or f"Channel {d['chat_id']}",
-            "mode": "join",
-            "invite_link": d.get("link"),
-        })
-        
-    all_missing = missing_force + mapped_dests
-    
-    if all_missing:
+    if missing_force:
         welcome_text = (
-            "Welcome to the Bot! 👋\n\n"
-            "Enjoy access to all the free channels where premium videos and files are being uploaded daily.\n\n"
-            "To unlock the bot and get your files, please join the channels below. "
-            "Only channels you haven't joined yet are shown:"
+            "Complete required access first.\n\n"
+            "Only unfinished channels are shown below. Join or send the request, then press Verify Access."
         )
         await message.answer(
             welcome_text,
-            reply_markup=keyboards.force_user_keyboard(all_missing)
+            reply_markup=keyboards.force_user_keyboard(missing_force)
         )
         return
 
@@ -85,15 +82,14 @@ async def send_user_entry(
         await DeliveryService(db, bot, settings).deliver(pending["token"], user_id, message.chat.id)
         return
 
-    welcome_joined = (
-        "Welcome to the Premium Bot! 👋\n\n"
-        "Enjoy access to all the free channels where premium videos and files are being uploaded daily.\n\n"
-        "You have joined all our channels and have full access to get premium videos.\n\n"
-        "Feel free to invite your friends using our referral system to increase your daily limit!"
-    )
+    runtime = await db.get_runtime_settings()
+    destinations = runtime.get("destination_channels") or []
+    missing_dests = await force_service.missing_destinations(user_id, destinations)
+
+    welcome_joined = format_welcome_message(missing_dests)
     await message.answer(
         welcome_joined,
-        reply_markup=keyboards.user_home_keyboard()
+        reply_markup=keyboards.user_unjoined_destinations_keyboard(missing_dests)
     )
 
 
@@ -104,31 +100,15 @@ async def verify_force_subscription(query: CallbackQuery, db: Database, bot: Bot
     force_service = ForceSubscriptionService(db, bot)
     missing_force = await force_service.missing_targets(user_id)
     
-    runtime = await db.get_runtime_settings()
-    destinations = runtime.get("destination_channels") or []
-    missing_dests = await force_service.missing_destinations(user_id, destinations)
-    
-    mapped_dests = []
-    for d in missing_dests:
-        mapped_dests.append({
-            "chat_id": d["chat_id"],
-            "title": d.get("title") or f"Channel {d['chat_id']}",
-            "mode": "join",
-            "invite_link": d.get("link"),
-        })
-        
-    all_missing = missing_force + mapped_dests
-    if all_missing:
+    if missing_force:
         welcome_text = (
-            "Welcome to the Bot! 👋\n\n"
-            "Enjoy access to all the free channels where premium videos and files are being uploaded daily.\n\n"
-            "To unlock the bot and get your files, please join the channels below. "
-            "Only channels you haven't joined yet are shown:"
+            "Complete required access first.\n\n"
+            "Only unfinished channels are shown below. Join or send the request, then press Verify Access."
         )
         try:
             await query.message.edit_text(
                 welcome_text,
-                reply_markup=keyboards.force_user_keyboard(all_missing),
+                reply_markup=keyboards.force_user_keyboard(missing_force),
             )
         except Exception:
             pass
@@ -141,14 +121,16 @@ async def verify_force_subscription(query: CallbackQuery, db: Database, bot: Bot
         await DeliveryService(db, bot, settings).deliver(pending["token"], user_id, query.message.chat.id)
         return
         
-    welcome_joined = (
-        "Welcome to the Premium Bot! 👋\n\n"
-        "Enjoy access to all the free channels where premium videos and files are being uploaded daily.\n\n"
-        "You have joined all our channels and have full access to get premium videos.\n\n"
-        "Feel free to invite your friends using our referral system to increase your daily limit!"
-    )
+    runtime = await db.get_runtime_settings()
+    destinations = runtime.get("destination_channels") or []
+    missing_dests = await force_service.missing_destinations(user_id, destinations)
+    
+    welcome_joined = format_welcome_message(missing_dests)
     try:
-        await query.message.edit_text(welcome_joined, reply_markup=keyboards.user_home_keyboard())
+        await query.message.edit_text(
+            welcome_joined, 
+            reply_markup=keyboards.user_unjoined_destinations_keyboard(missing_dests)
+        )
     except Exception:
         pass
 
@@ -160,44 +142,30 @@ async def user_home_callback(query: CallbackQuery, db: Database, bot: Bot, setti
     force_service = ForceSubscriptionService(db, bot)
     missing_force = await force_service.missing_targets(user_id)
     
-    runtime = await db.get_runtime_settings()
-    destinations = runtime.get("destination_channels") or []
-    missing_dests = await force_service.missing_destinations(user_id, destinations)
-    
-    mapped_dests = []
-    for d in missing_dests:
-        mapped_dests.append({
-            "chat_id": d["chat_id"],
-            "title": d.get("title") or f"Channel {d['chat_id']}",
-            "mode": "join",
-            "invite_link": d.get("link"),
-        })
-        
-    all_missing = missing_force + mapped_dests
-    if all_missing:
+    if missing_force:
         welcome_text = (
-            "Welcome to the Bot! 👋\n\n"
-            "Enjoy access to all the free channels where premium videos and files are being uploaded daily.\n\n"
-            "To unlock the bot and get your files, please join the channels below. "
-            "Only channels you haven't joined yet are shown:"
+            "Complete required access first.\n\n"
+            "Only unfinished channels are shown below. Join or send the request, then press Verify Access."
         )
         try:
             await query.message.edit_text(
                 welcome_text,
-                reply_markup=keyboards.force_user_keyboard(all_missing),
+                reply_markup=keyboards.force_user_keyboard(missing_force),
             )
         except Exception:
             pass
         return
         
-    welcome_joined = (
-        "Welcome to the Premium Bot! 👋\n\n"
-        "Enjoy access to all the free channels where premium videos and files are being uploaded daily.\n\n"
-        "You have joined all our channels and have full access to get premium videos.\n\n"
-        "Feel free to invite your friends using our referral system to increase your daily limit!"
-    )
+    runtime = await db.get_runtime_settings()
+    destinations = runtime.get("destination_channels") or []
+    missing_dests = await force_service.missing_destinations(user_id, destinations)
+    
+    welcome_joined = format_welcome_message(missing_dests)
     try:
-        await query.message.edit_text(welcome_joined, reply_markup=keyboards.user_home_keyboard())
+        await query.message.edit_text(
+            welcome_joined, 
+            reply_markup=keyboards.user_unjoined_destinations_keyboard(missing_dests)
+        )
     except Exception:
         pass
 

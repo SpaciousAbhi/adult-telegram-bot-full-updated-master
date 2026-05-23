@@ -199,6 +199,17 @@ def user_home_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def user_unjoined_destinations_keyboard(missing_dests: list[dict[str, Any]]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for dest in missing_dests:
+        title = dest.get("title") or f"Channel {dest.get('chat_id')}"
+        link = dest.get("link")
+        if link:
+            rows.append([url_btn(f"📢 Join: {title[:28]}", link)])
+    rows.append([btn("👥 Referral Program", "user_referral")])
+    return mk(rows)
+
+
 def delivered_file_keyboard(destinations: list[dict[str, Any]]) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     for dest in destinations:
