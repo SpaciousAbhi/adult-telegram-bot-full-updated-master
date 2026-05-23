@@ -104,6 +104,20 @@ class ForceSubscriptionService:
             missing.append(target)
         return missing
 
+    async def missing_destinations(self, user_id: int, destinations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        missing: list[dict[str, Any]] = []
+        for dest in destinations:
+            chat_id = dest.get("chat_id")
+            if not chat_id:
+                continue
+            try:
+                if await self.is_joined(int(chat_id), user_id):
+                    continue
+            except Exception:
+                pass
+            missing.append(dest)
+        return missing
+
     async def is_joined(self, chat_id: int, user_id: int) -> bool:
         try:
             member = await self.bot.get_chat_member(chat_id=chat_id, user_id=user_id)

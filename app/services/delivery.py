@@ -49,12 +49,14 @@ class DeliveryService:
             await self.bot.send_message(chat_id, "Video storage is not ready for this item.")
             return False
 
+        from app.ui import keyboards
         try:
             sent = await self.bot.copy_message(
                 chat_id=chat_id,
                 from_chat_id=chat_ref(storage_chat_id),
                 message_id=int(storage_message_id),
                 caption="@venom_stone_network",
+                reply_markup=keyboards.delivered_file_keyboard(runtime.get("destination_channels") or []),
             )
         except (TelegramBadRequest, TelegramForbiddenError):
             await self.bot.send_message(chat_id, "I could not deliver this video. Please try again later.")

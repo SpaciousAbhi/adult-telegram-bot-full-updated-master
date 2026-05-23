@@ -189,6 +189,24 @@ def force_user_keyboard(missing: list[dict[str, Any]]) -> InlineKeyboardMarkup:
         if link:
             rows.append([url_btn(f"{label}: {title[:28]}", link)])
     rows.append([btn("Verify Access", FORCE_VERIFY)])
+    rows.append([btn("👥 Referral Program", "user_referral")])
+    return mk(rows)
+
+
+def user_home_keyboard() -> InlineKeyboardMarkup:
+    return mk([
+        [btn("👥 Referral Program", "user_referral")]
+    ])
+
+
+def delivered_file_keyboard(destinations: list[dict[str, Any]]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for dest in destinations:
+        title = dest.get("title") or f"Channel {dest.get('chat_id')}"
+        link = dest.get("link")
+        if link:
+            rows.append([url_btn(f"📢 Join: {title[:28]}", link)])
+    rows.append([btn("👥 Referral Program", "user_referral")])
     return mk(rows)
 
 

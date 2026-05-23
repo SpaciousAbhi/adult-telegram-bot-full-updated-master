@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from aiogram import Bot, F, Router
-from aiogram.filters import CommandObject, CommandStart
+from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import CallbackQuery, ChatJoinRequest, ChatMemberUpdated, Message
 
 from app.callbacks import FORCE_VERIFY
@@ -47,9 +47,35 @@ async def send_user_entry(
     settings: Settings,
     user_id: int,
 ) -> None:
-    missing = await ForceSubscriptionService(db, bot).missing_targets(user_id)
-    if missing:
-        await message.answer(text.force_required(missing), reply_markup=keyboards.force_user_keyboard(missing))
+    force_service = ForceSubscriptionService(db, bot)
+    missing_force = await force_service.missing_targets(user_id)
+    
+    runtime = await db.get_runtime_settings()
+    destinations = runtime.get("destination_channels") or []
+    missing_dests = await force_service.missing_destinations(user_id, destinations)
+    
+    mapped_dests = []
+    for d in missing_dests:
+        mapped_dests.append({
+            "chat_id": d["chat_id"],
+            "title": d.get("title") or f"Channel {d['chat_id']}",
+            "mode": "join",
+            "invite_link": d.get("link"),
+        })
+        
+    all_missing = missing_force + mapped_dests
+    
+    if all_missing:
+        welcome_text = (
+            "Welcome to the Bot! 👋\n\n"
+            "Enjoy access to all the free channels where premium videos and files are being uploaded daily.\n\n"
+            "To unlock the bot and get your files, please join the channels below. "
+            "Only channels you haven't joined yet are shown:"
+        )
+        await message.answer(
+            welcome_text,
+            reply_markup=keyboards.force_user_keyboard(all_missing)
+        )
         return
 
     user = await db.get_user(user_id) or {}
@@ -59,29 +85,209 @@ async def send_user_entry(
         await DeliveryService(db, bot, settings).deliver(pending["token"], user_id, message.chat.id)
         return
 
-    runtime = await db.get_runtime_settings()
-    await message.answer(text.user_home(runtime.get("destination_channels") or []))
+    welcome_joined = (
+        "Welcome to the Premium Bot! 👋\n\n"
+        "Enjoy access to all the free channels where premium videos and files are being uploaded daily.\n\n"
+        "You have joined all our channels and have full access to get premium videos.\n\n"
+        "Feel free to invite your friends using our referral system to increase your daily limit!"
+    )
+    await message.answer(
+        welcome_joined,
+        reply_markup=keyboards.user_home_keyboard()
+    )
 
 
 @router.callback_query(F.data == FORCE_VERIFY)
 async def verify_force_subscription(query: CallbackQuery, db: Database, bot: Bot, settings: Settings) -> None:
     await query.answer("Checking access...")
-    missing = await ForceSubscriptionService(db, bot).missing_targets(query.from_user.id)
-    if missing:
-        await query.message.edit_text(
-            text.force_required(missing),
-            reply_markup=keyboards.force_user_keyboard(missing),
+    user_id = query.from_user.id
+    force_service = ForceSubscriptionService(db, bot)
+    missing_force = await force_service.missing_targets(user_id)
+    
+    runtime = await db.get_runtime_settings()
+    destinations = runtime.get("destination_channels") or []
+    missing_dests = await force_service.missing_destinations(user_id, destinations)
+    
+    mapped_dests = []
+    for d in missing_dests:
+        mapped_dests.append({
+            "chat_id": d["chat_id"],
+            "title": d.get("title") or f"Channel {d['chat_id']}",
+            "mode": "join",
+            "invite_link": d.get("link"),
+        })
+        
+    all_missing = missing_force + mapped_dests
+    if all_missing:
+        welcome_text = (
+            "Welcome to the Bot! 👋\n\n"
+            "Enjoy access to all the free channels where premium videos and files are being uploaded daily.\n\n"
+            "To unlock the bot and get your files, please join the channels below. "
+            "Only channels you haven't joined yet are shown:"
         )
+        try:
+            await query.message.edit_text(
+                welcome_text,
+                reply_markup=keyboards.force_user_keyboard(all_missing),
+            )
+        except Exception:
+            pass
         return
 
-    user = await db.get_user(query.from_user.id) or {}
+    user = await db.get_user(user_id) or {}
     pending = user.get("pending_action") or {}
-    await db.set_pending_action(query.from_user.id, None)
+    await db.set_pending_action(user_id, None)
     if pending.get("type") == "deliver" and pending.get("token"):
-        await DeliveryService(db, bot, settings).deliver(pending["token"], query.from_user.id, query.message.chat.id)
+        await DeliveryService(db, bot, settings).deliver(pending["token"], user_id, query.message.chat.id)
         return
+        
+    welcome_joined = (
+        "Welcome to the Premium Bot! 👋\n\n"
+        "Enjoy access to all the free channels where premium videos and files are being uploaded daily.\n\n"
+        "You have joined all our channels and have full access to get premium videos.\n\n"
+        "Feel free to invite your friends using our referral system to increase your daily limit!"
+    )
+    try:
+        await query.message.edit_text(welcome_joined, reply_markup=keyboards.user_home_keyboard())
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data == "user_home")
+async def user_home_callback(query: CallbackQuery, db: Database, bot: Bot, settings: Settings) -> None:
+    await query.answer()
+    user_id = query.from_user.id
+    force_service = ForceSubscriptionService(db, bot)
+    missing_force = await force_service.missing_targets(user_id)
+    
     runtime = await db.get_runtime_settings()
-    await query.message.edit_text(text.user_home(runtime.get("destination_channels") or []))
+    destinations = runtime.get("destination_channels") or []
+    missing_dests = await force_service.missing_destinations(user_id, destinations)
+    
+    mapped_dests = []
+    for d in missing_dests:
+        mapped_dests.append({
+            "chat_id": d["chat_id"],
+            "title": d.get("title") or f"Channel {d['chat_id']}",
+            "mode": "join",
+            "invite_link": d.get("link"),
+        })
+        
+    all_missing = missing_force + mapped_dests
+    if all_missing:
+        welcome_text = (
+            "Welcome to the Bot! 👋\n\n"
+            "Enjoy access to all the free channels where premium videos and files are being uploaded daily.\n\n"
+            "To unlock the bot and get your files, please join the channels below. "
+            "Only channels you haven't joined yet are shown:"
+        )
+        try:
+            await query.message.edit_text(
+                welcome_text,
+                reply_markup=keyboards.force_user_keyboard(all_missing),
+            )
+        except Exception:
+            pass
+        return
+        
+    welcome_joined = (
+        "Welcome to the Premium Bot! 👋\n\n"
+        "Enjoy access to all the free channels where premium videos and files are being uploaded daily.\n\n"
+        "You have joined all our channels and have full access to get premium videos.\n\n"
+        "Feel free to invite your friends using our referral system to increase your daily limit!"
+    )
+    try:
+        await query.message.edit_text(welcome_joined, reply_markup=keyboards.user_home_keyboard())
+    except Exception:
+        pass
+
+
+@router.message(Command("referral"))
+@router.message(Command("ref"))
+async def referral_command(message: Message, db: Database, bot: Bot, settings: Settings) -> None:
+    await send_referral_details(message, db, bot, message.from_user.id)
+
+
+@router.callback_query(F.data == "user_referral")
+async def referral_callback(query: CallbackQuery, db: Database, bot: Bot, settings: Settings) -> None:
+    await query.answer()
+    await send_referral_details(query.message, db, bot, query.from_user.id, edit_message=True)
+
+
+async def send_referral_details(
+    message: Message,
+    db: Database,
+    bot: Bot,
+    user_id: int,
+    edit_message: bool = False,
+) -> None:
+    runtime = await db.get_runtime_settings()
+    referral = runtime.get("referral") or {}
+    
+    referral_link = await ReferralService(db, bot).get_or_create_link(user_id)
+    referrals_count = await db.col("referral_events").count_documents({"referrer_id": int(user_id)})
+    
+    required_joins = int(referral.get("required_joins") or 10)
+    reward_limit = int(referral.get("reward_limit") or 100)
+    reward_days = int(referral.get("reward_days") or 5)
+    
+    user = await db.get_user(user_id) or {}
+    
+    from app.services.access import is_until_active
+    from app.timeutils import utcnow
+    now = utcnow()
+    
+    if user.get("referral_reward_until") and is_until_active(user.get("referral_reward_until"), now):
+        expires_at = user.get("referral_reward_until")
+        date_str = expires_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+        status_text = f"✅ Active (Reward limit: {reward_limit} daily until {date_str})"
+    else:
+        status_text = "❌ Inactive (Standard limit applies)"
+
+    if not referral_link:
+        msg_text = (
+            "👥 *Referral Program*\n\n"
+            "⚠️ The referral program is currently disabled by the administrator (no referral channel is set)."
+        )
+        markup = keyboards.mk([[keyboards.btn("◀️ Back", "user_home")]])
+    else:
+        import urllib.parse
+        share_text = "Join this amazing bot to get premium videos for free! 🔥"
+        share_url = f"https://t.me/share/url?url={urllib.parse.quote(referral_link)}&text={urllib.parse.quote(share_text)}"
+        
+        msg_text = (
+            "👥 *Bot Referral Program*\n\n"
+            "Invite your friends using your personal link and unlock **Premium access**!\n\n"
+            "*How it works:*\n"
+            "1. Share your invite link with your friends.\n"
+            "2. When they join our channel through your link, it counts as a referral.\n"
+            "3. Once you reach **{required} referrals**, your account is automatically upgraded to **{limit} daily downloads** for **{days} days**!\n\n"
+            "📈 *Your Statistics:*\n"
+            "• **Total Referrals:** `{count}` / `{required}`\n"
+            "• **Status:** {status}\n\n"
+            "🔗 *Your Invite Link:*\n"
+            "`{link}`"
+        ).format(
+            required=required_joins,
+            limit=reward_limit,
+            days=reward_days,
+            count=referrals_count,
+            status=status_text,
+            link=referral_link,
+        )
+        
+        markup = keyboards.mk([
+            [keyboards.url_btn("📲 Share Link", share_url)],
+            [keyboards.btn("◀️ Back", "user_home")]
+        ])
+
+    if edit_message:
+        try:
+            await message.edit_text(msg_text, reply_markup=markup, parse_mode="Markdown")
+        except Exception:
+            await message.answer(msg_text, reply_markup=markup, parse_mode="Markdown")
+    else:
+        await message.answer(msg_text, reply_markup=markup, parse_mode="Markdown")
 
 
 @router.chat_join_request()
