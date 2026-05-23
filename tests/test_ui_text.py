@@ -27,9 +27,9 @@ class UiTextTests(unittest.TestCase):
         }
         body = task_detail(task, pending_count=42, last_posted_token="abcde123")
         self.assertIn("Task: Test Task", body)
-        self.assertIn("Pending videos (in storage): 42", body)
-        self.assertIn("Last posted token: abcde123", body)
-        self.assertIn("Last result: Some Telegram error", body)
+        self.assertIn("Pending Videos (in storage): <code>42</code>", body)
+        self.assertIn("Last posted token: <code>abcde123</code>", body)
+        self.assertIn("Last result: <code>Some Telegram error</code>", body)
 
 
 if __name__ == "__main__":

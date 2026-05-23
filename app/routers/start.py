@@ -43,14 +43,16 @@ async def start_command(
 def format_welcome_message(missing_dests: list[dict[str, Any]]) -> str:
     if missing_dests:
         return (
-            "Welcome to the Premium Bot! 👋\n\n"
+            "✨ <b>Welcome to the Premium Bot!</b> 👋\n"
+            "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
             "Enjoy access to all the free channels where premium videos and files are being uploaded daily.\n\n"
-            "Here are our free content channels you can join:"
+            "📥 <b>Here are our free content channels you can join:</b>"
         )
     return (
-        "Welcome to the Premium Bot! 👋\n\n"
+        "✨ <b>Welcome to the Premium Bot!</b> 👋\n"
+        "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
         "Enjoy access to all the free channels where premium videos and files are being uploaded daily.\n\n"
-        "You have joined all our free content channels! Keep enjoying the daily uploads."
+        "✅ <b>You have joined all our free content channels!</b> Keep enjoying the daily uploads."
     )
 
 
@@ -65,12 +67,8 @@ async def send_user_entry(
     missing_force = await force_service.missing_targets(user_id)
     
     if missing_force:
-        welcome_text = (
-            "Complete required access first.\n\n"
-            "Only unfinished channels are shown below. Join or send the request, then press Verify Access."
-        )
         await message.answer(
-            welcome_text,
+            text.force_required(missing_force),
             reply_markup=keyboards.force_user_keyboard(missing_force)
         )
         return
@@ -101,13 +99,9 @@ async def verify_force_subscription(query: CallbackQuery, db: Database, bot: Bot
     missing_force = await force_service.missing_targets(user_id)
     
     if missing_force:
-        welcome_text = (
-            "Complete required access first.\n\n"
-            "Only unfinished channels are shown below. Join or send the request, then press Verify Access."
-        )
         try:
             await query.message.edit_text(
-                welcome_text,
+                text.force_required(missing_force),
                 reply_markup=keyboards.force_user_keyboard(missing_force),
             )
         except Exception:
@@ -143,13 +137,9 @@ async def user_home_callback(query: CallbackQuery, db: Database, bot: Bot, setti
     missing_force = await force_service.missing_targets(user_id)
     
     if missing_force:
-        welcome_text = (
-            "Complete required access first.\n\n"
-            "Only unfinished channels are shown below. Join or send the request, then press Verify Access."
-        )
         try:
             await query.message.edit_text(
-                welcome_text,
+                text.force_required(missing_force),
                 reply_markup=keyboards.force_user_keyboard(missing_force),
             )
         except Exception:
@@ -214,7 +204,8 @@ async def send_referral_details(
 
     if not referral_link:
         msg_text = (
-            "👥 *Referral Program*\n\n"
+            "👥 <b>Referral Program</b>\n"
+            "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
             "⚠️ The referral program is currently disabled by the administrator (no referral channel is set)."
         )
         markup = keyboards.mk([[keyboards.btn("◀️ Back", "user_home")]])
@@ -224,24 +215,19 @@ async def send_referral_details(
         share_url = f"https://t.me/share/url?url={urllib.parse.quote(referral_link)}&text={urllib.parse.quote(share_text)}"
         
         msg_text = (
-            "👥 *Bot Referral Program*\n\n"
-            "Invite your friends using your personal link and unlock **Premium access**!\n\n"
-            "*How it works:*\n"
+            "👥 <b>Bot Referral Program</b>\n"
+            "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
+            "Invite your friends using your personal link and unlock <b>Premium access</b>!\n\n"
+            "ℹ️ <b>How it works:</b>\n"
             "1. Share your invite link with your friends.\n"
             "2. When they join our channel through your link, it counts as a referral.\n"
-            "3. Once you reach **{required} referrals**, your account is automatically upgraded to **{limit} daily downloads** for **{days} days**!\n\n"
-            "📈 *Your Statistics:*\n"
-            "• **Total Referrals:** `{count}` / `{required}`\n"
-            "• **Status:** {status}\n\n"
-            "🔗 *Your Invite Link:*\n"
-            "`{link}`"
-        ).format(
-            required=required_joins,
-            limit=reward_limit,
-            days=reward_days,
-            count=referrals_count,
-            status=status_text,
-            link=referral_link,
+            f"3. Once you reach <b>{required_joins} referrals</b>, your account is automatically upgraded to <b>{reward_limit} daily downloads</b> for <b>{reward_days} days</b>!\n\n"
+            "📊 <b>Your Statistics:</b>\n"
+            f"• <b>Total Referrals:</b> <code>{referrals_count}</code> / <code>{required_joins}</code>\n"
+            f"• <b>Status:</b> {status_text}\n\n"
+            "🔗 <b>Your Invite Link:</b>\n"
+            f"<code>{referral_link}</code>\n"
+            "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬"
         )
         
         markup = keyboards.mk([
@@ -251,11 +237,11 @@ async def send_referral_details(
 
     if edit_message:
         try:
-            await message.edit_text(msg_text, reply_markup=markup, parse_mode="Markdown")
+            await message.edit_text(msg_text, reply_markup=markup)
         except Exception:
-            await message.answer(msg_text, reply_markup=markup, parse_mode="Markdown")
+            await message.answer(msg_text, reply_markup=markup)
     else:
-        await message.answer(msg_text, reply_markup=markup, parse_mode="Markdown")
+        await message.answer(msg_text, reply_markup=markup)
 
 
 @router.chat_join_request()

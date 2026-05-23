@@ -96,7 +96,7 @@ async def userbot_login(query: CallbackQuery, db: Database, settings: Settings) 
         return
     await query.answer()
     await AdminStateStore(db).set(query.from_user.id, "userbot_api_id", {"next": "string"})
-    await query.message.answer("Send the Telegram API ID for the userbot account. Send /cancel to stop.")
+    await query.message.answer("⌨️ <b>Send the Telegram API ID</b> for the userbot account.\n\n<i>Send /cancel to stop.</i>")
 
 
 @router.callback_query(F.data == cb("userbot", "phone"))
@@ -105,7 +105,7 @@ async def userbot_phone_login(query: CallbackQuery, db: Database, settings: Sett
         return
     await query.answer()
     await AdminStateStore(db).set(query.from_user.id, "userbot_api_id", {"next": "phone"})
-    await query.message.answer("Send the Telegram API ID for the userbot account. Send /cancel to stop.")
+    await query.message.answer("⌨️ <b>Send the Telegram API ID</b> for the userbot account.\n\n<i>Send /cancel to stop.</i>")
 
 
 @router.callback_query(F.data == cb("userbot", "logout"))
@@ -134,7 +134,7 @@ async def task_new(query: CallbackQuery, db: Database, settings: Settings) -> No
         return
     await query.answer()
     await AdminStateStore(db).set(query.from_user.id, "task_new")
-    await query.message.answer("Send the new task name. Send /cancel to stop.")
+    await query.message.answer("⌨️ <b>Send the name for the new task</b>.\n\n<i>Send /cancel to stop.</i>")
 
 
 @router.callback_query(F.data.startswith("task:"))
@@ -170,26 +170,26 @@ async def task_callbacks(
         return
     if action in {"addsrc", "adddst", "storage", "interval", "amount"} and len(parts) >= 3:
         prompts = {
-            "addsrc": "Send source numeric ID, @username, or t.me link. You can also forward a message from the source.",
-            "adddst": "Send destination as chat_id | title | public_link, or forward a message from the destination channel.",
-            "storage": "Send the storage channel numeric ID or forward a message from the storage channel.",
-            "interval": "Choose a preset below, or send a custom interval like 1 minute, 5m, 30m, 1 hour, or seconds.",
-            "amount": "Choose a preset below, or send a custom number of posts per interval.",
+            "addsrc": "📥 <b>Send source details:</b>\nProvide a numeric ID, @username, or t.me link. You can also forward a message from the source channel.",
+            "adddst": "📤 <b>Send destination details:</b>\nProvide it as: <code>chat_id | title | public_link</code>, or forward a message from the destination channel.",
+            "storage": "📦 <b>Send storage channel details:</b>\nProvide the numeric ID or forward a message from the storage channel.",
+            "interval": "⏱️ <b>Set run interval:</b>\nChoose a preset below, or send a custom interval (e.g., <i>1 minute, 5m, 30m, 1 hour, 1d</i>).",
+            "amount": "🔢 <b>Set post amount:</b>\nChoose a preset below, or send a custom number of posts per interval.",
         }
         await query.answer()
         await AdminStateStore(db).set(query.from_user.id, f"task_{action}", {"task_id": parts[2]})
         if action == "interval":
             await query.message.answer(
-                prompts[action] + " Send /cancel to stop.",
+                f"{prompts[action]}\n\n<i>Send /cancel to stop.</i>",
                 reply_markup=keyboards.task_interval_keyboard(parts[2]),
             )
         elif action == "amount":
             await query.message.answer(
-                prompts[action] + " Send /cancel to stop.",
+                f"{prompts[action]}\n\n<i>Send /cancel to stop.</i>",
                 reply_markup=keyboards.task_amount_keyboard(parts[2]),
             )
         else:
-            await query.message.answer(prompts[action] + " Send /cancel to stop.")
+            await query.message.answer(f"{prompts[action]}\n\n<i>Send /cancel to stop.</i>")
         return
     if action == "setint" and len(parts) >= 4:
         seconds = int(parts[3])
@@ -227,9 +227,9 @@ async def task_callbacks(
         return
     if action in {"srcedit", "dstedit"} and len(parts) >= 4:
         prompt = (
-            "Send replacement source numeric ID, @username, or t.me link."
+            "📝 <b>Send replacement source details:</b>\nProvide a numeric ID, @username, or t.me link."
             if action == "srcedit"
-            else "Send replacement destination as: chat_id | title | public_link."
+            else "📝 <b>Send replacement destination details:</b>\nProvide it as: <code>chat_id | title | public_link</code>."
         )
         await query.answer()
         await AdminStateStore(db).set(
@@ -237,7 +237,7 @@ async def task_callbacks(
             f"task_{action}",
             {"task_id": parts[2], "index": int(parts[3])},
         )
-        await query.message.answer(prompt + " Send /cancel to stop.")
+        await query.message.answer(f"{prompt}\n\n<i>Send /cancel to stop.</i>")
         return
     if action in {"srcpau", "srcres", "srcrm", "dstpau", "dstres", "dstrm"} and len(parts) >= 4:
         await update_task_item_control(db, parts[2], int(parts[3]), action)
@@ -291,8 +291,9 @@ async def force_callbacks(query: CallbackQuery, db: Database, bot: Bot, settings
         await query.answer()
         await AdminStateStore(db).set(query.from_user.id, "force_add")
         await query.message.answer(
-            "Send force channel as: chat_id | title | join/request | invite_link(optional). "
-            "Forwarded channel messages are also supported when Telegram exposes the chat."
+            "➕ <b>Send force subscription channel details:</b>\n"
+            "Format: <code>chat_id | title | join/request | invite_link(optional)</code>\n\n"
+            "<i>Note: Forwarded channel messages are also supported when Telegram exposes the chat. Send /cancel to stop.</i>"
         )
         return
     if action == "target" and len(parts) >= 3:
@@ -344,15 +345,15 @@ async def access_callbacks(query: CallbackQuery, db: Database, settings: Setting
         "refrule": "access_refrule",
     }
     prompts = {
-        "limit": "Send the free daily download limit, for example 5, 10, or 15.",
-        "premium": "Send premium grant as: user_id days. Example: 123456789 30",
-        "refchan": "Send the referral channel numeric ID.",
-        "refrule": "Send referral rule as: required_joins reward_limit reward_days. Example: 10 100 5",
+        "limit": "🔢 <b>Send free daily limit:</b>\nProvide a number (e.g., <i>5, 10, or 15</i>).",
+        "premium": "💎 <b>Send premium access grant:</b>\nProvide as: <code>user_id days</code> (e.g., <i>123456789 30</i>).",
+        "refchan": "📢 <b>Send referral channel ID:</b>\nProvide the numeric ID of the referral group/channel.",
+        "refrule": "⚙️ <b>Send referral rule details:</b>\nProvide as: <code>required_joins reward_limit reward_days</code> (e.g., <i>10 100 5</i>).",
     }
     if action in states:
         await query.answer()
         await AdminStateStore(db).set(query.from_user.id, states[action])
-        await query.message.answer(prompts[action] + " Send /cancel to stop.")
+        await query.message.answer(f"{prompts[action]}\n\n<i>Send /cancel to stop.</i>")
         return
     await query.answer("Unknown access action", show_alert=True)
 
@@ -386,7 +387,7 @@ async def auto_delete_callbacks(query: CallbackQuery, db: Database, settings: Se
     if action == "time":
         await query.answer()
         await AdminStateStore(db).set(query.from_user.id, "autodel_time", {"target": target})
-        await query.message.answer("Send delete time like 10m, 1h, 1d, or seconds. Send /cancel to stop.")
+        await query.message.answer("⏱️ <b>Send auto-delete duration:</b>\nFormat: <i>10m, 1h, 1d</i> or seconds.\n\n<i>Send /cancel to stop.</i>")
         return
     await query.answer("Unknown auto-delete action", show_alert=True)
 
@@ -405,7 +406,7 @@ async def broadcast_new(query: CallbackQuery, db: Database, settings: Settings) 
         return
     await query.answer()
     await AdminStateStore(db).set(query.from_user.id, "broadcast_new")
-    await query.message.answer("Send or forward the message to broadcast to all saved users. Send /cancel to stop.")
+    await query.message.answer("📣 <b>Send or forward the message to broadcast:</b>\nIt will be cloned and copied to all saved users.\n\n<i>Send /cancel to stop.</i>")
 
 
 @router.message(Command("cancel"))
@@ -481,7 +482,7 @@ async def handle_userbot_api_id(message: Message, db: Database) -> bool:
     payload = dict((state or {}).get("payload") or {})
     payload["api_id"] = int(raw)
     await AdminStateStore(db).set(message.from_user.id, "userbot_api_hash", payload)
-    await message.answer("API ID saved. Now send the API Hash. Send /cancel to stop.")
+    await message.answer("✅ <b>API ID saved.</b>\nNow send the Telegram API Hash.\n\n<i>Send /cancel to stop.</i>")
     return False
 
 
@@ -493,10 +494,10 @@ async def handle_userbot_api_hash(message: Message, db: Database, settings: Sett
     next_step = payload.get("next") or "phone"
     if next_step == "string":
         await AdminStateStore(db).set(message.from_user.id, "userbot_login")
-        await message.answer("API Hash saved. Now paste the Telethon StringSession. Send /cancel to stop.")
+        await message.answer("✅ <b>API Hash saved.</b>\nNow paste the Telethon StringSession string.\n\n<i>Send /cancel to stop.</i>")
     else:
         await AdminStateStore(db).set(message.from_user.id, "userbot_phone")
-        await message.answer("API Hash saved. Now send the phone number in international format. Example: +911234567890")
+        await message.answer("✅ <b>API Hash saved.</b>\nNow send the phone number in international format (e.g., <code>+911234567890</code>).\n\n<i>Send /cancel to stop.</i>")
     return False
 
 
@@ -506,7 +507,7 @@ async def handle_userbot_phone(message: Message, db: Database, settings: Setting
         raise ValueError("send a phone number like +911234567890")
     attempt = await UserbotService(db, settings).start_phone_login(phone)
     await AdminStateStore(db).set(message.from_user.id, "userbot_code", attempt)
-    await message.answer("Login code sent in Telegram. Send the code here. Send /cancel to stop.")
+    await message.answer("📥 <b>Login code sent on Telegram.</b>\nEnter the numeric code here.\n\n<i>Send /cancel to stop.</i>")
     return False
 
 
@@ -524,7 +525,7 @@ async def handle_userbot_code(message: Message, db: Database, settings: Settings
         await message.answer("Userbot login completed.", reply_markup=keyboards.home_back_keyboard())
         return True
     await AdminStateStore(db).set(message.from_user.id, "userbot_password")
-    await message.answer("This account has 2FA enabled. Send the password. Send /cancel to stop.")
+    await message.answer("🔐 <b>2FA protection detected.</b>\nEnter the account 2FA password.\n\n<i>Send /cancel to stop.</i>")
     return False
 
 

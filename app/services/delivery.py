@@ -82,18 +82,24 @@ class DeliveryService:
         referral_text = ""
         if referral_link:
             referral_text = (
-                "\n\nReferral option: "
-                f"if {referral.get('required_joins', 10)} users join through your link, "
-                f"your daily limit becomes {referral.get('reward_limit', 100)} videos for "
-                f"{referral.get('reward_days', 5)} days."
+                "\n\n👥 <b>Referral Promotion:</b>\n"
+                f"Invite <code>{referral.get('required_joins', 10)}</code> friends to join our sponsor channels, "
+                f"and unlock <b>{referral.get('reward_limit', 100)} daily downloads</b> for "
+                f"<b>{referral.get('reward_days', 5)} days</b>!"
             )
         admin_id = self.settings.primary_admin_id if self.settings else chat_id
-        rows = [[InlineKeyboardButton(text="Contact Admin to Buy Premium", url=f"tg://user?id={admin_id}")]]
+        rows = [[InlineKeyboardButton(text="💎 Contact Admin to Buy Premium", url=f"tg://user?id={admin_id}")]]
         if referral_link:
-            rows.append([InlineKeyboardButton(text="Referral to Earn Premium", url=referral_link)])
+            rows.append([InlineKeyboardButton(text="👥 Refer Friends & Earn Premium", url=referral_link)])
         await self.bot.send_message(
             chat_id,
-            f"{message}\n\nDaily free limit: {limit}\nPayment methods: {methods}{referral_text}",
+            "⚠️ <b>Daily Download Limit Reached</b>\n"
+            "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
+            f"{message}\n\n"
+            f"• 📊 <b>Your daily limit:</b> <code>{limit}</code> downloads\n"
+            f"• 💳 <b>Payment methods:</b> <code>{methods}</code>"
+            f"{referral_text}\n"
+            "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
         )
 

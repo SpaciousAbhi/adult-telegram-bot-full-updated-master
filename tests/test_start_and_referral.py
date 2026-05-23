@@ -77,7 +77,7 @@ class StartAndReferralTests(unittest.IsolatedAsyncioTestCase):
             message.answer.assert_called_once()
             args, kwargs = message.answer.call_args
             self.assertIn("Invite your friends using your personal link", args[0])
-            self.assertIn("• **Total Referrals:** `3` / `5`", args[0])
+            self.assertIn("• <b>Total Referrals:</b> <code>3</code> / <code>5</code>", args[0])
             self.assertIn("✅ Active (Reward limit: 50 daily", args[0])
             self.assertIn("https://t.me/bot?start=ref_12345", args[0])
             
