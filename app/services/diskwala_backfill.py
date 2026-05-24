@@ -73,7 +73,7 @@ async def run_diskwala_backfill(db: Database, settings: Settings, bot: Bot, admi
                         try:
                             reply = await conv.get_response(timeout=3)
                             if reply and reply.text and "diskwala.com" in reply.text:
-                                match = re.search(r'(https?://[^\s]+diskwala\.com[^\s]+)', reply.text)
+                                match = re.search(r'(https?://[^\s]*diskwala\.com[^\s]+)', reply.text)
                                 if match:
                                     diskwala_link = match.group(1)
                                     break

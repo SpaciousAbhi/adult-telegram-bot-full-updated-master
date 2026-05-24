@@ -531,7 +531,7 @@ class TaskScheduler:
                             reply = await conv.get_response(timeout=3)
                             if reply and reply.text and "diskwala.com" in reply.text:
                                 import re
-                                match = re.search(r'(https?://[^\s]+diskwala\.com[^\s]+)', reply.text)
+                                match = re.search(r'(https?://[^\s]*diskwala\.com[^\s]+)', reply.text)
                                 if match:
                                     diskwala_link = match.group(1)
                                     break
