@@ -39,12 +39,18 @@ async def run_diskwala_backfill(db: Database, settings: Settings, bot: Bot, admi
 
         await bot.send_message(admin_id, f"Found {total} videos missing Diskwala links. Processing...")
 
-        cursor = db.col("media").find(query).sort("created_at", ASCENDING)
+        # Pre-fetch all IDs to avoid CursorNotFound timeout on long runs
+        cursor = db.col("media").find(query, {"_id": 1}).sort("created_at", ASCENDING)
+        media_ids = [doc["_id"] async for doc in cursor]
         
         success = 0
         failed = 0
         
-        async for media in cursor:
+        for media_id in media_ids:
+            media = await db.col("media").find_one({"_id": media_id})
+            if not media:
+                continue
+                
             token = media["token"]
             storage_chat_id = media["storage_chat_id"]
             storage_message_id = media["storage_message_id"]
