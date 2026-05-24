@@ -22,6 +22,7 @@ from app.callbacks import (
     FORWARD_TAG_TOGGLE,
     TASKS_HOME,
     USERBOT_HOME,
+    DISK_HOME,
     cb,
     split_cb,
 )
@@ -453,6 +454,8 @@ async def admin_state_message(message: Message, db: Database, bot: Bot, settings
             await handle_autodel_time(message, db, payload)
         elif name == "broadcast_new":
             await handle_broadcast(message, db, bot)
+        elif name in {"disk_setkey", "disk_setbot"}:
+            await handle_disk_update(message, db, settings, name)
         else:
             await message.answer("Unknown pending action. Use /cancel and try again.")
             return
@@ -1029,3 +1032,66 @@ def extract_telegram_id(user_doc: dict[str, Any]) -> int | None:
         if isinstance(value, str) and value.isdigit():
             return int(value)
     return None
+
+
+@router.callback_query(F.data == DISK_HOME)
+async def diskwala_home(query: CallbackQuery, db: Database, settings: Settings) -> None:
+    if await reject_callback_if_not_admin(query, settings):
+        return
+    await query.answer()
+    runtime = await db.get_runtime_settings()
+    await safe_edit(query, text.diskwala_settings(runtime), keyboards.diskwala_keyboard(runtime))
+
+
+@router.callback_query(F.data.startswith("disk:"))
+async def diskwala_callbacks(query: CallbackQuery, db: Database, settings: Settings) -> None:
+    if await reject_callback_if_not_admin(query, settings):
+        return
+    parts = split_cb(query.data)
+    action = parts[1] if len(parts) > 1 else ""
+    
+    if action == "toggle":
+        runtime = await db.get_runtime_settings()
+        enabled = not bool(runtime.get("diskwala", {}).get("enabled"))
+        await db.set_runtime_path("diskwala.enabled", enabled)
+        await query.answer("Diskwala toggle updated")
+        runtime = await db.get_runtime_settings()
+        await safe_edit(query, text.diskwala_settings(runtime), keyboards.diskwala_keyboard(runtime))
+        return
+
+    if action == "setkey":
+        await query.answer()
+        await AdminStateStore(db).set(query.from_user.id, "disk_setkey")
+        await query.message.answer("🔑 <b>Send your Diskwala API Key:</b>\n\n<i>Send /cancel to stop.</i>")
+        return
+
+    if action == "setbot":
+        await query.answer()
+        await AdminStateStore(db).set(query.from_user.id, "disk_setbot")
+        await query.message.answer("🤖 <b>Send the Uploader Bot username:</b>\n(Without @, e.g., <i>DiskWalaFileUploaderBot</i>)\n\n<i>Send /cancel to stop.</i>")
+        return
+
+    await query.answer("Unknown diskwala action", show_alert=True)
+
+
+async def handle_disk_update(message: Message, db: Database, settings: Settings, name: str) -> None:
+    raw = (message.text or "").strip()
+    if name == "disk_setkey":
+        await db.set_runtime_path("diskwala.api_key", raw)
+        await message.answer("Diskwala API Key updated.", reply_markup=keyboards.home_back_keyboard())
+        
+        # Try to send /api <key> to the uploader bot
+        runtime = await db.get_runtime_settings()
+        bot_username = runtime.get("diskwala", {}).get("bot_username", "DiskWalaFileUploaderBot")
+        try:
+            userbot = UserbotService(db, settings)
+            if userbot.client:
+                await userbot.client.send_message(bot_username, f"/api {raw}")
+                await message.answer(f"Sent API key to @{bot_username} via userbot.")
+        except Exception as e:
+            logger.warning("Failed to auto-send API key to uploader bot: %s", e)
+            
+    elif name == "disk_setbot":
+        bot_username = raw.lstrip("@")
+        await db.set_runtime_path("diskwala.bot_username", bot_username)
+        await message.answer("Diskwala Uploader Bot updated.", reply_markup=keyboards.home_back_keyboard())

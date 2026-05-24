@@ -43,24 +43,47 @@ class DeliveryService:
             await self.send_limit_exhausted(chat_id, user_id, runtime, decision.limit)
             return False
 
-        storage_chat_id = fix_channel_id(media.get("storage_chat_id"))
-        storage_message_id = media.get("storage_message_id")
-        if not storage_chat_id or not storage_message_id:
-            await self.bot.send_message(chat_id, "Video storage is not ready for this item.")
-            return False
-
-        from app.ui import keyboards
-        try:
-            sent = await self.bot.copy_message(
-                chat_id=chat_id,
-                from_chat_id=chat_ref(storage_chat_id),
-                message_id=int(storage_message_id),
-                caption="@venom_stone_network",
-                reply_markup=keyboards.delivered_file_keyboard(await self.db.get_all_destinations()),
+        diskwala = runtime.get("diskwala", {})
+        if diskwala.get("enabled") and media.get("diskwala_link"):
+            diskwala_link = media["diskwala_link"]
+            caption = (
+                "⚡ <b>Your Video Is Ready! Watch & Download Now</b> 🚀\n"
+                "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
+                "🍿 <b>You can download and watch unlimited videos.</b>\n\n"
+                "• ⚡ High-speed streaming & download links\n"
+                "• 🎬 Full HD quality ready\n"
+                "• 🚫 No premium limits required\n"
+                "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬"
             )
-        except (TelegramBadRequest, TelegramForbiddenError):
-            await self.bot.send_message(chat_id, "I could not deliver this video. Please try again later.")
-            return False
+            from app.ui import keyboards
+            try:
+                sent = await self.bot.send_message(
+                    chat_id,
+                    caption,
+                    reply_markup=keyboards.diskwala_delivery_keyboard(diskwala_link, await self.db.get_all_destinations())
+                )
+            except (TelegramBadRequest, TelegramForbiddenError):
+                await self.bot.send_message(chat_id, "I could not deliver this video. Please try again later.")
+                return False
+        else:
+            storage_chat_id = fix_channel_id(media.get("storage_chat_id"))
+            storage_message_id = media.get("storage_message_id")
+            if not storage_chat_id or not storage_message_id:
+                await self.bot.send_message(chat_id, "Video storage is not ready for this item.")
+                return False
+
+            from app.ui import keyboards
+            try:
+                sent = await self.bot.copy_message(
+                    chat_id=chat_id,
+                    from_chat_id=chat_ref(storage_chat_id),
+                    message_id=int(storage_message_id),
+                    caption="@venom_stone_network",
+                    reply_markup=keyboards.delivered_file_keyboard(await self.db.get_all_destinations()),
+                )
+            except (TelegramBadRequest, TelegramForbiddenError):
+                await self.bot.send_message(chat_id, "I could not deliver this video. Please try again later.")
+                return False
 
         await self.db.col("downloads").insert_one(
             {

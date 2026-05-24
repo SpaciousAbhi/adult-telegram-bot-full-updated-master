@@ -517,6 +517,32 @@ class TaskScheduler:
             "posted_destination_chat_ids": [],
             "created_at": utcnow(),
         }
+
+        diskwala = runtime.get("diskwala", {})
+        if diskwala.get("enabled") and diskwala.get("bot_username"):
+            bot_username = diskwala.get("bot_username")
+            try:
+                async with client.conversation(bot_username, timeout=15) as conv:
+                    await conv.send_message(message)
+                    end_time = asyncio.get_event_loop().time() + 12
+                    diskwala_link = None
+                    while asyncio.get_event_loop().time() < end_time:
+                        try:
+                            reply = await conv.get_response(timeout=3)
+                            if reply and reply.text and "diskwala.com" in reply.text:
+                                import re
+                                match = re.search(r'(https?://[^\s]+diskwala\.com[^\s]+)', reply.text)
+                                if match:
+                                    diskwala_link = match.group(1)
+                                    break
+                        except asyncio.TimeoutError:
+                            continue
+                    if diskwala_link:
+                        media_doc["diskwala_link"] = diskwala_link
+                        logger.info("Diskwala link generated: %s for %s", diskwala_link, token)
+            except Exception as e:
+                logger.warning("Diskwala upload failed for %s: %s", token, e)
+
         if existing:
             token = existing.get("token") or token
             media_doc["token"] = token

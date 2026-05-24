@@ -14,6 +14,7 @@ from app.callbacks import (
     FORWARD_TAG_TOGGLE,
     TASKS_HOME,
     USERBOT_HOME,
+    DISK_HOME,
     cb,
 )
 
@@ -36,7 +37,7 @@ def admin_home_keyboard() -> InlineKeyboardMarkup:
             [btn("🤖 Userbot Settings", USERBOT_HOME), btn("📋 Task List", TASKS_HOME)],
             [btn("⏱️ Auto Delete", AUTO_DELETE_HOME), btn("📢 Force Subscription", FORCE_HOME)],
             [btn("🔑 Access Settings", ACCESS_HOME), btn("📣 Broadcast System", BROADCAST_HOME)],
-            [btn("🏷️ Forward Tag: On/Off", FORWARD_TAG_TOGGLE)],
+            [btn("🏷️ Forward Tag: On/Off", FORWARD_TAG_TOGGLE), btn("🔗 Diskwala Settings", DISK_HOME)],
         ]
     )
 
@@ -240,3 +241,28 @@ def auto_delete_keyboard() -> InlineKeyboardMarkup:
 
 def broadcast_keyboard() -> InlineKeyboardMarkup:
     return mk([[btn("📣 Start Broadcast", cb("broadcast", "new"))], [btn("◀️ Back to Admin Panel", ADMIN_HOME)]])
+
+
+def diskwala_keyboard(runtime: dict[str, Any]) -> InlineKeyboardMarkup:
+    diskwala = runtime.get("diskwala", {})
+    enabled = diskwala.get("enabled", False)
+    return mk(
+        [
+            [btn("✅ Enabled" if enabled else "❌ Disabled", cb("disk", "toggle"))],
+            [btn("🔑 Set API Key", cb("disk", "setkey")), btn("🤖 Set Uploader Bot", cb("disk", "setbot"))],
+            [btn("◀️ Back to Admin Panel", ADMIN_HOME)],
+        ]
+    )
+
+
+def diskwala_delivery_keyboard(diskwala_link: str, destinations: list[dict[str, Any]]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = [
+        [url_btn("🍿 Click Here For Your Video — Your Video Is Ready 🎬", diskwala_link)]
+    ]
+    rows.append([btn("👥 Referral Program", "user_referral")])
+    for dest in destinations:
+        title = dest.get("title") or f"Channel {dest.get('chat_id')}"
+        link = dest.get("link")
+        if link:
+            rows.append([url_btn(f"📢 Join: {title[:25]}", link)])
+    return mk(rows)

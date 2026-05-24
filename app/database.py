@@ -44,6 +44,11 @@ DEFAULT_RUNTIME_SETTINGS: dict[str, Any] = {
     "referral": DEFAULT_REFERRAL_SETTINGS,
     "auto_delete": DEFAULT_AUTO_DELETE_SETTINGS,
     "destination_channels": [],
+    "diskwala": {
+        "enabled": False,
+        "api_key": "",
+        "bot_username": "DiskWalaFileUploaderBot",
+    },
 }
 
 

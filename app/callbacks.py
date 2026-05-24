@@ -30,4 +30,4 @@ BROADCAST_HOME = cb("broadcast", "home")
 AUTO_DELETE_HOME = cb("autodel", "home")
 FORWARD_TAG_TOGGLE = cb("settings", "forward_tag")
 FORCE_VERIFY = cb("force", "verify")
-
+DISK_HOME = cb("disk", "home")

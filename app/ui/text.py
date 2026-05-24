@@ -290,3 +290,22 @@ def broadcast_home(stats: dict[str, Any]) -> str:
         "3. The bot will clone and broadcast it to all registered users.\n"
         "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬"
     )
+
+
+def diskwala_settings(runtime: dict[str, Any]) -> str:
+    diskwala = runtime.get("diskwala", {})
+    enabled = "🟢 Enabled" if diskwala.get("enabled") else "🔴 Disabled"
+    api_key = diskwala.get("api_key") or "Not set"
+    bot_username = diskwala.get("bot_username") or "Not set"
+    return (
+        "🔗 <b>DISKWALA MONETIZATION</b>\n"
+        "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
+        "Upload files to Diskwala automatically to earn money from your traffic.\n\n"
+        f"• 📊 <b>Status:</b> {enabled}\n"
+        f"• 🔑 <b>API Key:</b> <code>{api_key}</code>\n"
+        f"• 🤖 <b>Uploader Bot:</b> <code>{bot_username}</code>\n\n"
+        "<b>Requirements:</b>\n"
+        "- <b>Userbot</b> must be logged in to forward files to the Uploader Bot.\n"
+        "- The Uploader Bot must be started. If not, the userbot will do it.\n"
+        "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬"
+    )
