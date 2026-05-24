@@ -250,6 +250,7 @@ def diskwala_keyboard(runtime: dict[str, Any]) -> InlineKeyboardMarkup:
         [
             [btn("✅ Enabled" if enabled else "❌ Disabled", cb("disk", "toggle"))],
             [btn("🔑 Set API Key", cb("disk", "setkey")), btn("🤖 Set Uploader Bot", cb("disk", "setbot"))],
+            [btn("🔄 Start Backfill (Old Videos)", cb("disk", "backfill"))],
             [btn("◀️ Back to Admin Panel", ADMIN_HOME)],
         ]
     )

@@ -1071,6 +1071,13 @@ async def diskwala_callbacks(query: CallbackQuery, db: Database, settings: Setti
         await query.message.answer("🤖 <b>Send the Uploader Bot username:</b>\n(Without @, e.g., <i>DiskWalaFileUploaderBot</i>)\n\n<i>Send /cancel to stop.</i>")
         return
 
+    if action == "backfill":
+        await query.answer()
+        from app.services.diskwala_backfill import run_diskwala_backfill
+        import asyncio
+        asyncio.create_task(run_diskwala_backfill(db, settings, bot, query.from_user.id))
+        return
+
     await query.answer("Unknown diskwala action", show_alert=True)
 
 
