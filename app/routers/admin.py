@@ -1044,7 +1044,7 @@ async def diskwala_home(query: CallbackQuery, db: Database, settings: Settings) 
 
 
 @router.callback_query(F.data.startswith("disk:"))
-async def diskwala_callbacks(query: CallbackQuery, db: Database, settings: Settings) -> None:
+async def diskwala_callbacks(query: CallbackQuery, db: Database, settings: Settings, bot: Bot) -> None:
     if await reject_callback_if_not_admin(query, settings):
         return
     parts = split_cb(query.data)
