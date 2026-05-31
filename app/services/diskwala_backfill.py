@@ -11,19 +11,23 @@ logger = logging.getLogger(__name__)
 
 async def run_diskwala_backfill(db: Database, settings: Settings, bot: Bot, admin_id: int):
     try:
-        await bot.send_message(admin_id, "🔄 Starting Diskwala backfill in the background. This may take a while depending on how many old videos you have.")
+        await bot.send_message(
+            admin_id,
+            "🔄 <b>Diskwala Backfill Started</b>\n"
+            "The bot is checking old stored videos and adding missing Diskwala links in the background.",
+        )
         
         runtime = await db.get_runtime_settings()
         diskwala = runtime.get("diskwala", {})
         bot_username = diskwala.get("bot_username", "DiskWalaFileUploaderBot")
         if not diskwala.get("enabled"):
-            await bot.send_message(admin_id, "⚠️ Diskwala is not enabled. Please enable it in the admin panel first.")
+            await bot.send_message(admin_id, "⚠️ <b>Backfill Blocked</b>\nEnable Diskwala in the admin panel first.")
             return
 
         userbot = UserbotService(db, settings)
         client = await userbot.client()
         if not client:
-            await bot.send_message(admin_id, "⚠️ Userbot is not logged in. Cannot run backfill.")
+            await bot.send_message(admin_id, "⚠️ <b>Backfill Blocked</b>\nLogin the userbot before running Diskwala backfill.")
             return
 
         query = {
@@ -34,10 +38,13 @@ async def run_diskwala_backfill(db: Database, settings: Settings, bot: Bot, admi
         }
         total = await db.col("media").count_documents(query)
         if total == 0:
-            await bot.send_message(admin_id, "✅ All old videos already have Diskwala links!")
+            await bot.send_message(admin_id, "✅ <b>Backfill Complete</b>\nAll stored videos already have Diskwala links.")
             return
 
-        await bot.send_message(admin_id, f"Found {total} videos missing Diskwala links. Processing...")
+        await bot.send_message(
+            admin_id,
+            f"📦 <b>Backfill Queue</b>\nFound <code>{total}</code> videos missing Diskwala links. Processing now…",
+        )
 
         # Pre-fetch all IDs to avoid CursorNotFound timeout on long runs
         cursor = db.col("media").find(query, {"_id": 1}).sort("created_at", ASCENDING)
@@ -94,8 +101,14 @@ async def run_diskwala_backfill(db: Database, settings: Settings, bot: Bot, admi
                 
             await asyncio.sleep(2)
             
-        await bot.send_message(admin_id, f"✅ Backfill finished!\n\nSuccessfully linked: {success}\nFailed: {failed}")
+        await bot.send_message(
+            admin_id,
+            "✅ <b>Backfill Finished</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"• Linked: <code>{success}</code>\n"
+            f"• Failed: <code>{failed}</code>",
+        )
 
     except Exception as e:
         logger.exception("Backfill task error")
-        await bot.send_message(admin_id, f"❌ Backfill task crashed: {e}")
+        await bot.send_message(admin_id, f"❌ <b>Backfill Failed</b>\n<code>{e}</code>")

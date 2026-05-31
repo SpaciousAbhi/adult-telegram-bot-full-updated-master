@@ -4,6 +4,16 @@ from bson import ObjectId
 from app.services.task_runner import TaskScheduler
 
 class PostingPipelineTests(unittest.IsolatedAsyncioTestCase):
+    async def test_destination_caption_is_premium_and_scannable(self):
+        scheduler = TaskScheduler(MagicMock(), MagicMock(), AsyncMock())
+
+        caption = scheduler.destination_caption({"duration": 120, "size": 25 * 1024 * 1024})
+
+        self.assertIn("Premium Video Drop", caption)
+        self.assertIn("Duration: <code>2m</code>", caption)
+        self.assertIn("Size: <code>25.00 MB</code>", caption)
+        self.assertLess(len(caption), 1024)
+
     async def test_destination_posting_downloads_thumbnail_on_the_fly(self):
         db = MagicMock()
         settings = MagicMock()

@@ -32,7 +32,11 @@ class DeliveryService:
     async def deliver(self, token: str, user_id: int, chat_id: int) -> bool:
         media = await self.db.col("media").find_one({"token": token})
         if not media:
-            await self.bot.send_message(chat_id, "This video link is no longer available.")
+            await self.bot.send_message(
+                chat_id,
+                "⚠️ <b>Link Expired</b>\n"
+                "This video is no longer available from that post. Open the latest channel post and try again.",
+            )
             return False
 
         runtime = await self.db.get_runtime_settings()
@@ -47,13 +51,13 @@ class DeliveryService:
         if diskwala.get("enabled") and media.get("diskwala_link"):
             diskwala_link = media["diskwala_link"]
             caption = (
-                "⚡ <b>Your Video Is Ready! Watch & Download Now</b> 🚀\n"
-                "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
-                "🍿 <b>You can download and watch unlimited videos.</b>\n\n"
-                "• ⚡ High-speed streaming & download links\n"
-                "• 🎬 Full HD quality ready\n"
-                "• 🚫 No premium limits required\n"
-                "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬"
+                "🎬 <b>Your Video Is Ready</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "Use the secure button below to open the video link.\n\n"
+                "• Fast stream and download access\n"
+                "• Works outside Telegram when the file is hosted externally\n"
+                "• Keep this message until your download starts\n"
+                "━━━━━━━━━━━━━━━━━━━━"
             )
             from app.ui import keyboards
             try:
@@ -63,13 +67,21 @@ class DeliveryService:
                     reply_markup=keyboards.diskwala_delivery_keyboard(diskwala_link, await self.db.get_all_destinations())
                 )
             except (TelegramBadRequest, TelegramForbiddenError):
-                await self.bot.send_message(chat_id, "I could not deliver this video. Please try again later.")
+                await self.bot.send_message(
+                    chat_id,
+                    "⚠️ <b>Delivery Failed</b>\n"
+                    "Telegram could not send the video link right now. Please try again in a moment.",
+                )
                 return False
         else:
             storage_chat_id = fix_channel_id(media.get("storage_chat_id"))
             storage_message_id = media.get("storage_message_id")
             if not storage_chat_id or not storage_message_id:
-                await self.bot.send_message(chat_id, "Video storage is not ready for this item.")
+                await self.bot.send_message(
+                    chat_id,
+                    "⚠️ <b>Video Not Ready</b>\n"
+                    "This item is still missing its storage copy. Please open another post or try this one later.",
+                )
                 return False
 
             from app.ui import keyboards
@@ -78,11 +90,18 @@ class DeliveryService:
                     chat_id=chat_id,
                     from_chat_id=chat_ref(storage_chat_id),
                     message_id=int(storage_message_id),
-                    caption="@venom_stone_network",
+                    caption=(
+                        "🎬 <b>Your Video Is Ready</b>\n\n"
+                        "<i>Save it now. This delivery can auto-delete if cleanup is enabled.</i>"
+                    ),
                     reply_markup=keyboards.delivered_file_keyboard(await self.db.get_all_destinations()),
                 )
             except (TelegramBadRequest, TelegramForbiddenError):
-                await self.bot.send_message(chat_id, "I could not deliver this video. Please try again later.")
+                await self.bot.send_message(
+                    chat_id,
+                    "⚠️ <b>Delivery Failed</b>\n"
+                    "Telegram could not copy this video into your chat. Please try again in a moment.",
+                )
                 return False
 
         await self.db.col("downloads").insert_one(
@@ -106,34 +125,30 @@ class DeliveryService:
         referral_text = ""
         if referral_link:
             referral_text = (
-                "\n\n⚡ <b>UNLIMITED CONTENT WITH REFERRALS!</b>\n"
-                "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
-                "Don't want to buy Premium? You can get it for <b>FREE</b>!\n\n"
-                "👥 <b>Invite your friends:</b>\n"
-                f"Share your personal link and get <b>{referral.get('required_joins', 10)} friends</b> to join our channels.\n\n"
-                f"🎁 <b>Your Reward:</b>\n"
-                f"Get upgraded to a massive limit of <b>{referral.get('reward_limit', 100)} daily downloads</b> for <b>{referral.get('reward_days', 5)} full days</b> completely free!"
+                "\n\n👥 <b>Earn Premium With Referrals</b>\n"
+                f"Invite <b>{referral.get('required_joins', 10)} friends</b> through your referral link to unlock "
+                f"<b>{referral.get('reward_limit', 100)} daily downloads</b> for <b>{referral.get('reward_days', 5)} days</b>."
             )
         else:
             referral_text = (
                 "\n\n👥 <b>Referral Program:</b>\n"
-                "Invite friends to upgrade your daily limit. (Disabled by admin)"
+                "Referral rewards are paused by the admin right now."
             )
             
         admin_id = self.settings.primary_admin_id if self.settings else chat_id
-        rows = [[InlineKeyboardButton(text="💎 Contact Admin to Buy Premium", url=f"tg://user?id={admin_id}")]]
+        rows = [[InlineKeyboardButton(text="💎 Contact Admin", url=f"tg://user?id={admin_id}")]]
         if referral_link:
-            rows.append([InlineKeyboardButton(text="👥 Refer Friends & Earn Premium", url=referral_link)])
+            rows.append([InlineKeyboardButton(text="👥 Earn Premium", url=referral_link)])
             
         await self.bot.send_message(
             chat_id,
             "⚠️ <b>Daily Download Limit Reached</b>\n"
-            "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
             f"{message}\n\n"
-            f"• 📊 <b>Your daily limit:</b> <code>{limit}</code> downloads\n"
-            f"• 💳 <b>Payment methods:</b> <code>{methods}</code>"
+            f"• Daily limit: <code>{limit}</code> downloads\n"
+            f"• Payment methods: <code>{methods}</code>"
             f"{referral_text}\n"
-            "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬",
+            "━━━━━━━━━━━━━━━━━━━━",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
         )
 

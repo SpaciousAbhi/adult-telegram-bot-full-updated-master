@@ -41,12 +41,7 @@ async def start_command(
 
 
 def format_welcome_message(missing_dests: list[dict[str, Any]]) -> str:
-    return (
-        "✨ <b>Welcome to the Premium Bot!</b> 👋\n"
-        "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
-        "Enjoy access to all the free channels where premium videos and files are being uploaded daily.\n\n"
-        "📥 <b>Here are our free content channels you can join:</b>"
-    )
+    return text.user_home(missing_dests)
 
 
 async def send_user_entry(
@@ -58,6 +53,14 @@ async def send_user_entry(
 ) -> None:
     user = await db.get_user(user_id) or {}
     pending = user.get("pending_action") or {}
+    missing_force_targets = await ForceSubscriptionService(db, bot).missing_targets(user_id)
+    if missing_force_targets:
+        await message.answer(
+            text.force_required(missing_force_targets),
+            reply_markup=keyboards.force_user_keyboard(missing_force_targets),
+        )
+        return
+
     if pending.get("type") == "deliver" and pending.get("token"):
         await db.set_pending_action(user_id, None)
         await DeliveryService(db, bot, settings).deliver(pending["token"], user_id, message.chat.id)
@@ -74,9 +77,23 @@ async def send_user_entry(
 
 @router.callback_query(F.data == FORCE_VERIFY)
 async def verify_force_subscription(query: CallbackQuery, db: Database, bot: Bot, settings: Settings) -> None:
-    await query.answer("Checking access...")
+    await query.answer("Checking access…")
     user_id = query.from_user.id
-    
+
+    missing_force_targets = await ForceSubscriptionService(db, bot).missing_targets(user_id)
+    if missing_force_targets:
+        try:
+            await query.message.edit_text(
+                text.force_required(missing_force_targets),
+                reply_markup=keyboards.force_user_keyboard(missing_force_targets),
+            )
+        except Exception:
+            await query.message.answer(
+                text.force_required(missing_force_targets),
+                reply_markup=keyboards.force_user_keyboard(missing_force_targets),
+            )
+        return
+
     user = await db.get_user(user_id) or {}
     pending = user.get("pending_action") or {}
     await db.set_pending_action(user_id, None)
@@ -100,9 +117,23 @@ async def verify_force_subscription(query: CallbackQuery, db: Database, bot: Bot
 async def user_home_callback(query: CallbackQuery, db: Database, bot: Bot, settings: Settings) -> None:
     await query.answer()
     user_id = query.from_user.id
-    
+
+    missing_force_targets = await ForceSubscriptionService(db, bot).missing_targets(user_id)
+    if missing_force_targets:
+        try:
+            await query.message.edit_text(
+                text.force_required(missing_force_targets),
+                reply_markup=keyboards.force_user_keyboard(missing_force_targets),
+            )
+        except Exception:
+            await query.message.answer(
+                text.force_required(missing_force_targets),
+                reply_markup=keyboards.force_user_keyboard(missing_force_targets),
+            )
+        return
+
     destinations = await db.get_all_destinations()
-    
+
     welcome_joined = format_welcome_message(destinations)
     try:
         await query.message.edit_text(
@@ -151,41 +182,40 @@ async def send_referral_details(
     if user.get("referral_reward_until") and is_until_active(user.get("referral_reward_until"), now):
         expires_at = user.get("referral_reward_until")
         date_str = expires_at.strftime("%Y-%m-%d %H:%M:%S UTC")
-        status_text = f"✅ Active (Reward limit: {reward_limit} daily until {date_str})"
+        status_text = f"🟢 Active · {reward_limit} daily downloads until {date_str}"
     else:
-        status_text = "❌ Inactive (Standard limit applies)"
+        status_text = "⚪ Standard daily limit is active"
 
     if not referral_link:
         msg_text = (
-            "👥 <b>Referral Program</b>\n"
-            "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
-            "⚠️ The referral program is currently disabled by the administrator (no referral channel is set)."
+            "👥 <b>Referral Rewards</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "Referral rewards are paused because no referral channel is configured yet.\n\n"
+            "<i>Please check again later.</i>"
         )
-        markup = keyboards.mk([[keyboards.btn("◀️ Back", "user_home")]])
+        markup = keyboards.mk([[keyboards.btn("⬅️ Home", "user_home")]])
     else:
         import urllib.parse
-        share_text = "Join this amazing bot to get premium videos for free! 🔥"
+        share_text = "Join this premium video bot and unlock daily access."
         share_url = f"https://t.me/share/url?url={urllib.parse.quote(referral_link)}&text={urllib.parse.quote(share_text)}"
         
         msg_text = (
-            "👥 <b>Bot Referral Program</b>\n"
-            "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n"
-            "Invite your friends using your personal link and unlock <b>Premium access</b>!\n\n"
-            "ℹ️ <b>How it works:</b>\n"
-            "1. Share your invite link with your friends.\n"
-            "2. When they join our channel through your link, it counts as a referral.\n"
-            f"3. Once you reach <b>{required_joins} referrals</b>, your account is automatically upgraded to <b>{reward_limit} daily downloads</b> for <b>{reward_days} days</b>!\n\n"
-            "📊 <b>Your Statistics:</b>\n"
+            "👥 <b>Referral Rewards</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "Invite friends with your personal link. When they join through it, your reward progress updates automatically.\n\n"
+            "🎁 <b>Reward</b>\n"
+            f"Reach <b>{required_joins} verified joins</b> to unlock <b>{reward_limit} daily downloads</b> for <b>{reward_days} days</b>.\n\n"
+            "📊 <b>Your Progress</b>\n"
             f"• <b>Total Referrals:</b> <code>{referrals_count}</code> / <code>{required_joins}</code>\n"
             f"• <b>Status:</b> {status_text}\n\n"
-            "🔗 <b>Your Invite Link:</b>\n"
+            "🔗 <b>Your Invite Link</b>\n"
             f"<code>{referral_link}</code>\n"
-            "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬"
+            "━━━━━━━━━━━━━━━━━━━━"
         )
         
         markup = keyboards.mk([
-            [keyboards.url_btn("📲 Share Link", share_url)],
-            [keyboards.btn("◀️ Back", "user_home")]
+            [keyboards.url_btn("📤 Share Invite", share_url)],
+            [keyboards.btn("⬅️ Home", "user_home")]
         ])
 
     if edit_message:

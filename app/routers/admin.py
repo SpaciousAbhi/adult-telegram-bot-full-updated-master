@@ -4,6 +4,7 @@ import asyncio
 import logging
 import re
 from datetime import timedelta
+from html import escape
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -97,7 +98,11 @@ async def userbot_login(query: CallbackQuery, db: Database, settings: Settings) 
         return
     await query.answer()
     await AdminStateStore(db).set(query.from_user.id, "userbot_api_id", {"next": "string"})
-    await query.message.answer("⌨️ <b>Send the Telegram API ID</b> for the userbot account.\n\n<i>Send /cancel to stop.</i>")
+    await query.message.answer(
+        "🤖 <b>Userbot Login</b>\n"
+        "Send the Telegram API ID for the account that will scan source channels.\n\n"
+        "<i>Send /cancel anytime to stop.</i>"
+    )
 
 
 @router.callback_query(F.data == cb("userbot", "phone"))
@@ -106,7 +111,11 @@ async def userbot_phone_login(query: CallbackQuery, db: Database, settings: Sett
         return
     await query.answer()
     await AdminStateStore(db).set(query.from_user.id, "userbot_api_id", {"next": "phone"})
-    await query.message.answer("⌨️ <b>Send the Telegram API ID</b> for the userbot account.\n\n<i>Send /cancel to stop.</i>")
+    await query.message.answer(
+        "🤖 <b>Phone Login</b>\n"
+        "Send the Telegram API ID for the userbot account.\n\n"
+        "<i>Send /cancel anytime to stop.</i>"
+    )
 
 
 @router.callback_query(F.data == cb("userbot", "logout"))
@@ -114,7 +123,7 @@ async def userbot_logout(query: CallbackQuery, db: Database, settings: Settings)
     if await reject_callback_if_not_admin(query, settings):
         return
     await UserbotService(db, settings).logout()
-    await query.answer("Userbot logged out")
+    await query.answer("Userbot logged out.")
     doc = await UserbotService(db, settings).session_doc()
     service = UserbotService(db, settings)
     await safe_edit(query, text.userbot_home(doc, await service.has_credentials()), keyboards.userbot_keyboard(False))
@@ -135,7 +144,11 @@ async def task_new(query: CallbackQuery, db: Database, settings: Settings) -> No
         return
     await query.answer()
     await AdminStateStore(db).set(query.from_user.id, "task_new")
-    await query.message.answer("⌨️ <b>Send the name for the new task</b>.\n\n<i>Send /cancel to stop.</i>")
+    await query.message.answer(
+        "📋 <b>Create Posting Task</b>\n"
+        "Send a short, recognizable task name. Example: <code>Main Channel Drops</code>\n\n"
+        "<i>Send /cancel anytime to stop.</i>"
+    )
 
 
 @router.callback_query(F.data.startswith("task:"))
@@ -171,26 +184,41 @@ async def task_callbacks(
         return
     if action in {"addsrc", "adddst", "storage", "interval", "amount"} and len(parts) >= 3:
         prompts = {
-            "addsrc": "📥 <b>Send source details:</b>\nProvide a numeric ID, @username, or t.me link. You can also forward a message from the source channel.",
-            "adddst": "📤 <b>Send destination details:</b>\nProvide it as: <code>chat_id | title | public_link</code>, or forward a message from the destination channel.",
-            "storage": "📦 <b>Send storage channel details:</b>\nProvide the numeric ID or forward a message from the storage channel.",
-            "interval": "⏱️ <b>Set run interval:</b>\nChoose a preset below, or send a custom interval (e.g., <i>1 minute, 5m, 30m, 1 hour, 1d</i>).",
-            "amount": "🔢 <b>Set post amount:</b>\nChoose a preset below, or send a custom number of posts per interval.",
+            "addsrc": (
+                "📥 <b>Add Source</b>\n"
+                "Send a numeric ID, @username, t.me link, or forward a message from the source channel."
+            ),
+            "adddst": (
+                "📤 <b>Add Destination</b>\n"
+                "Send <code>chat_id | title | public_link</code>, or forward a message from the destination channel."
+            ),
+            "storage": (
+                "📦 <b>Set Storage Channel</b>\n"
+                "Send the numeric channel ID, or forward a message from the storage channel."
+            ),
+            "interval": (
+                "⏱ <b>Posting Interval</b>\n"
+                "Choose a preset below, or send a custom interval like <i>5m</i>, <i>30m</i>, <i>1 hour</i>, or <i>1d</i>."
+            ),
+            "amount": (
+                "🔢 <b>Batch Size</b>\n"
+                "Choose a preset below, or send the number of videos to post per interval."
+            ),
         }
         await query.answer()
         await AdminStateStore(db).set(query.from_user.id, f"task_{action}", {"task_id": parts[2]})
         if action == "interval":
             await query.message.answer(
-                f"{prompts[action]}\n\n<i>Send /cancel to stop.</i>",
+                f"{prompts[action]}\n\n<i>Send /cancel anytime to stop.</i>",
                 reply_markup=keyboards.task_interval_keyboard(parts[2]),
             )
         elif action == "amount":
             await query.message.answer(
-                f"{prompts[action]}\n\n<i>Send /cancel to stop.</i>",
+                f"{prompts[action]}\n\n<i>Send /cancel anytime to stop.</i>",
                 reply_markup=keyboards.task_amount_keyboard(parts[2]),
             )
         else:
-            await query.message.answer(f"{prompts[action]}\n\n<i>Send /cancel to stop.</i>")
+            await query.message.answer(f"{prompts[action]}\n\n<i>Send /cancel anytime to stop.</i>")
         return
     if action == "setint" and len(parts) >= 4:
         seconds = int(parts[3])
@@ -198,7 +226,7 @@ async def task_callbacks(
             {"_id": ObjectId(parts[2])},
             {"$set": {"interval_seconds": seconds, "next_run_at": utcnow() + timedelta(seconds=seconds), "updated_at": utcnow()}},
         )
-        await query.answer("Interval saved")
+        await query.answer("Interval saved.")
         await AdminStateStore(db).clear(query.from_user.id)
         await show_task(query, db, parts[2])
         return
@@ -208,7 +236,7 @@ async def task_callbacks(
             {"_id": ObjectId(parts[2])},
             {"$set": {"posts_per_interval": amount, "updated_at": utcnow()}},
         )
-        await query.answer("Post amount saved")
+        await query.answer("Batch size saved.")
         await AdminStateStore(db).clear(query.from_user.id)
         await show_task(query, db, parts[2])
         return
@@ -216,21 +244,21 @@ async def task_callbacks(
         if not scheduler:
             await query.answer("Scheduler is not running", show_alert=True)
             return
-        await query.answer("Manual run started")
+        await query.answer("Manual run started…")
         asyncio.create_task(run_manual_with_progress_edit(query, db, scheduler, parts[2]))
         return
     if action == "clearstorage" and len(parts) >= 3:
         await db.col("tasks").update_one(
             {"_id": ObjectId(parts[2])}, {"$set": {"storage_channel": None, "updated_at": utcnow()}}
         )
-        await query.answer("Storage removed")
+        await query.answer("Storage channel cleared.")
         await show_task(query, db, parts[2])
         return
     if action in {"srcedit", "dstedit"} and len(parts) >= 4:
         prompt = (
-            "📝 <b>Send replacement source details:</b>\nProvide a numeric ID, @username, or t.me link."
+            "📝 <b>Edit Source</b>\nSend a numeric ID, @username, or t.me link."
             if action == "srcedit"
-            else "📝 <b>Send replacement destination details:</b>\nProvide it as: <code>chat_id | title | public_link</code>."
+            else "📝 <b>Edit Destination</b>\nSend <code>chat_id | title | public_link</code>."
         )
         await query.answer()
         await AdminStateStore(db).set(
@@ -238,11 +266,11 @@ async def task_callbacks(
             f"task_{action}",
             {"task_id": parts[2], "index": int(parts[3])},
         )
-        await query.message.answer(f"{prompt}\n\n<i>Send /cancel to stop.</i>")
+        await query.message.answer(f"{prompt}\n\n<i>Send /cancel anytime to stop.</i>")
         return
     if action in {"srcpau", "srcres", "srcrm", "dstpau", "dstres", "dstrm"} and len(parts) >= 4:
         await update_task_item_control(db, parts[2], int(parts[3]), action)
-        await query.answer("Updated")
+        await query.answer("Updated.")
         if action.startswith("src"):
             await show_task_sources(query, db, parts[2])
         else:
@@ -266,7 +294,7 @@ async def task_callbacks(
             {"_id": ObjectId(parts[2])},
             {"$set": update_fields}
         )
-        await query.answer(f"Auto-posting {'started' if status == 'active' else 'paused'}")
+        await query.answer(f"Posting {'started' if status == 'active' else 'paused'}.")
         await show_task(query, db, parts[2])
         return
     await query.answer("Unknown task action", show_alert=True)
@@ -292,9 +320,10 @@ async def force_callbacks(query: CallbackQuery, db: Database, bot: Bot, settings
         await query.answer()
         await AdminStateStore(db).set(query.from_user.id, "force_add")
         await query.message.answer(
-            "➕ <b>Send force subscription channel details:</b>\n"
-            "Format: <code>chat_id | title | join/request | invite_link(optional)</code>\n\n"
-            "<i>Note: Forwarded channel messages are also supported when Telegram exposes the chat. Send /cancel to stop.</i>"
+            "🔐 <b>Add Required Channel</b>\n"
+            "Send <code>chat_id | title | join/request | invite_link(optional)</code>.\n\n"
+            "Forwarded channel messages are also supported when Telegram exposes the chat.\n\n"
+            "<i>Send /cancel anytime to stop.</i>"
         )
         return
     if action == "target" and len(parts) >= 3:
@@ -311,13 +340,13 @@ async def force_callbacks(query: CallbackQuery, db: Database, bot: Bot, settings
             await service.refresh_invite_link(chat_id)
         else:
             await service.remove_target(chat_id)
-        await query.answer("Updated")
+        await query.answer("Updated.")
         targets = await service.targets()
         await safe_edit(query, text.force_home(targets), keyboards.force_targets_keyboard(targets))
         return
     if action == "mode" and len(parts) >= 4:
         await service.set_mode(int(parts[2]), parts[3])
-        await query.answer("Mode updated")
+        await query.answer("Mode updated.")
         target = await db.col("force_targets").find_one({"chat_id": int(parts[2])})
         if target:
             await safe_edit(query, text.force_home([target]), keyboards.force_target_keyboard(target))
@@ -346,15 +375,15 @@ async def access_callbacks(query: CallbackQuery, db: Database, settings: Setting
         "refrule": "access_refrule",
     }
     prompts = {
-        "limit": "🔢 <b>Send free daily limit:</b>\nProvide a number (e.g., <i>5, 10, or 15</i>).",
-        "premium": "💎 <b>Send premium access grant:</b>\nProvide as: <code>user_id days</code> (e.g., <i>123456789 30</i>).",
-        "refchan": "📢 <b>Send referral channel ID:</b>\nProvide the numeric ID of the referral group/channel.",
-        "refrule": "⚙️ <b>Send referral rule details:</b>\nProvide as: <code>required_joins reward_limit reward_days</code> (e.g., <i>10 100 5</i>).",
+        "limit": "🔢 <b>Free Daily Limit</b>\nSend a number, for example <i>5</i>, <i>10</i>, or <i>15</i>.",
+        "premium": "💎 <b>Grant Premium</b>\nSend <code>user_id days</code>, for example <i>123456789 30</i>.",
+        "refchan": "📢 <b>Referral Channel</b>\nSend the numeric channel or group ID used for referral tracking.",
+        "refrule": "⚙️ <b>Referral Rules</b>\nSend <code>required_joins reward_limit reward_days</code>, for example <i>10 100 5</i>.",
     }
     if action in states:
         await query.answer()
         await AdminStateStore(db).set(query.from_user.id, states[action])
-        await query.message.answer(f"{prompts[action]}\n\n<i>Send /cancel to stop.</i>")
+        await query.message.answer(f"{prompts[action]}\n\n<i>Send /cancel anytime to stop.</i>")
         return
     await query.answer("Unknown access action", show_alert=True)
 
@@ -382,13 +411,17 @@ async def auto_delete_callbacks(query: CallbackQuery, db: Database, settings: Se
     if action == "toggle":
         key = f"{target}_enabled"
         await db.set_runtime_path(f"auto_delete.{key}", not bool(settings_doc.get(key)))
-        await query.answer("Updated")
+        await query.answer("Updated.")
         await safe_edit(query, text.auto_delete_home(await db.get_runtime_settings()), keyboards.auto_delete_keyboard())
         return
     if action == "time":
         await query.answer()
         await AdminStateStore(db).set(query.from_user.id, "autodel_time", {"target": target})
-        await query.message.answer("⏱️ <b>Send auto-delete duration:</b>\nFormat: <i>10m, 1h, 1d</i> or seconds.\n\n<i>Send /cancel to stop.</i>")
+        await query.message.answer(
+            "⏱ <b>Auto-Delete Delay</b>\n"
+            "Send a duration like <i>10m</i>, <i>1h</i>, <i>1d</i>, or raw seconds.\n\n"
+            "<i>Send /cancel anytime to stop.</i>"
+        )
         return
     await query.answer("Unknown auto-delete action", show_alert=True)
 
@@ -407,7 +440,11 @@ async def broadcast_new(query: CallbackQuery, db: Database, settings: Settings) 
         return
     await query.answer()
     await AdminStateStore(db).set(query.from_user.id, "broadcast_new")
-    await query.message.answer("📣 <b>Send or forward the message to broadcast:</b>\nIt will be cloned and copied to all saved users.\n\n<i>Send /cancel to stop.</i>")
+    await query.message.answer(
+        "📣 <b>Start Broadcast</b>\n"
+        "Send or forward the exact message to broadcast. The bot will clone it to every saved user and update progress here.\n\n"
+        "<i>Send /cancel anytime to stop.</i>"
+    )
 
 
 @router.message(Command("cancel"))
@@ -415,7 +452,7 @@ async def cancel_state(message: Message, db: Database, settings: Settings) -> No
     if await reject_message_if_not_admin(message, settings):
         return
     await AdminStateStore(db).clear(message.from_user.id)
-    await message.answer("Cancelled.", reply_markup=keyboards.home_back_keyboard())
+    await message.answer("✅ Cancelled. No pending admin action remains.", reply_markup=keyboards.home_back_keyboard())
 
 
 @router.message()
@@ -457,13 +494,14 @@ async def admin_state_message(message: Message, db: Database, bot: Bot, settings
         elif name in {"disk_setkey", "disk_setbot"}:
             await handle_disk_update(message, db, settings, name)
         else:
-            await message.answer("Unknown pending action. Use /cancel and try again.")
+            await message.answer("⚠️ Unknown pending action. Use /cancel and try again.")
             return
     except ValueError as exc:
-        await message.answer(f"Invalid input: {exc}")
+        await message.answer(f"⚠️ <b>Invalid Input</b>\n<code>{escape(str(exc), quote=False)}</code>")
         return
     except Exception as exc:
-        await message.answer(f"Action failed: {exc}")
+        logger.exception("admin_state_failed name=%s", name)
+        await message.answer(f"❌ <b>Action Failed</b>\n<code>{escape(str(exc), quote=False)}</code>")
         return
     if clear_state:
         await state_store.clear(message.from_user.id)
@@ -474,7 +512,7 @@ async def handle_userbot_login(message: Message, db: Database, settings: Setting
     if len(session_string) < 50:
         raise ValueError("session string is too short")
     await UserbotService(db, settings).save_session_string(session_string)
-    await message.answer("Userbot session saved.", reply_markup=keyboards.home_back_keyboard())
+    await message.answer("✅ Userbot session saved.", reply_markup=keyboards.home_back_keyboard())
 
 
 async def handle_userbot_api_id(message: Message, db: Database) -> bool:
@@ -485,7 +523,7 @@ async def handle_userbot_api_id(message: Message, db: Database) -> bool:
     payload = dict((state or {}).get("payload") or {})
     payload["api_id"] = int(raw)
     await AdminStateStore(db).set(message.from_user.id, "userbot_api_hash", payload)
-    await message.answer("✅ <b>API ID saved.</b>\nNow send the Telegram API Hash.\n\n<i>Send /cancel to stop.</i>")
+    await message.answer("✅ <b>API ID Saved</b>\nNow send the Telegram API Hash.\n\n<i>Send /cancel anytime to stop.</i>")
     return False
 
 
@@ -497,10 +535,14 @@ async def handle_userbot_api_hash(message: Message, db: Database, settings: Sett
     next_step = payload.get("next") or "phone"
     if next_step == "string":
         await AdminStateStore(db).set(message.from_user.id, "userbot_login")
-        await message.answer("✅ <b>API Hash saved.</b>\nNow paste the Telethon StringSession string.\n\n<i>Send /cancel to stop.</i>")
+        await message.answer("✅ <b>API Hash Saved</b>\nNow paste the Telethon StringSession string.\n\n<i>Send /cancel anytime to stop.</i>")
     else:
         await AdminStateStore(db).set(message.from_user.id, "userbot_phone")
-        await message.answer("✅ <b>API Hash saved.</b>\nNow send the phone number in international format (e.g., <code>+911234567890</code>).\n\n<i>Send /cancel to stop.</i>")
+        await message.answer(
+            "✅ <b>API Hash Saved</b>\n"
+            "Now send the phone number in international format, for example <code>+911234567890</code>.\n\n"
+            "<i>Send /cancel anytime to stop.</i>"
+        )
     return False
 
 
@@ -510,7 +552,7 @@ async def handle_userbot_phone(message: Message, db: Database, settings: Setting
         raise ValueError("send a phone number like +911234567890")
     attempt = await UserbotService(db, settings).start_phone_login(phone)
     await AdminStateStore(db).set(message.from_user.id, "userbot_code", attempt)
-    await message.answer("📥 <b>Login code sent on Telegram.</b>\nEnter the numeric code here.\n\n<i>Send /cancel to stop.</i>")
+    await message.answer("📥 <b>Login Code Sent</b>\nEnter the numeric code here.\n\n<i>Send /cancel anytime to stop.</i>")
     return False
 
 
@@ -525,10 +567,10 @@ async def handle_userbot_code(message: Message, db: Database, settings: Settings
         session_string=payload["session_string"],
     )
     if completed:
-        await message.answer("Userbot login completed.", reply_markup=keyboards.home_back_keyboard())
+        await message.answer("✅ Userbot login completed.", reply_markup=keyboards.home_back_keyboard())
         return True
     await AdminStateStore(db).set(message.from_user.id, "userbot_password")
-    await message.answer("🔐 <b>2FA protection detected.</b>\nEnter the account 2FA password.\n\n<i>Send /cancel to stop.</i>")
+    await message.answer("🔐 <b>2FA Required</b>\nEnter the account 2FA password.\n\n<i>Send /cancel anytime to stop.</i>")
     return False
 
 
@@ -537,7 +579,7 @@ async def handle_userbot_password(message: Message, db: Database, settings: Sett
     if not password:
         raise ValueError("send the 2FA password")
     await UserbotService(db, settings).complete_password(password)
-    await message.answer("Userbot login completed.", reply_markup=keyboards.home_back_keyboard())
+    await message.answer("✅ Userbot login completed.", reply_markup=keyboards.home_back_keyboard())
 
 
 async def handle_task_new(message: Message, db: Database) -> None:
@@ -568,7 +610,7 @@ async def handle_task_update(message: Message, db: Database, name: str, payload:
         value, title, _ = parse_channel_like_input(message, require_numeric=False)
         source = {"value": value, "title": title or str(value), "status": "active", "added_at": utcnow()}
         await db.col("tasks").update_one({"_id": task_id}, {"$push": {"sources": source}, "$set": {"updated_at": utcnow()}})
-        await message.answer("Source added.")
+        await message.answer("✅ Source added.")
     elif name == "task_srcedit":
         index = int(payload["index"])
         sources = list(task.get("sources", []))
@@ -577,7 +619,7 @@ async def handle_task_update(message: Message, db: Database, name: str, payload:
         value, title, _ = parse_channel_like_input(message, require_numeric=False)
         sources[index].update({"value": value, "title": title or str(value), "updated_at": utcnow()})
         await db.col("tasks").update_one({"_id": task_id}, {"$set": {"sources": sources, "updated_at": utcnow()}})
-        await message.answer("Source updated.")
+        await message.answer("✅ Source updated.")
     elif name == "task_adddst":
         value, title, link = parse_channel_like_input(message, require_numeric=False)
         destination = {"chat_id": value, "title": title or str(value), "link": link, "status": "active", "added_at": utcnow()}
@@ -586,7 +628,7 @@ async def handle_task_update(message: Message, db: Database, name: str, payload:
             {"$push": {"destinations": destination}, "$set": {"updated_at": utcnow()}},
         )
         await add_runtime_destination(db, destination)
-        await message.answer("Destination added.")
+        await message.answer("✅ Destination added.")
     elif name == "task_dstedit":
         index = int(payload["index"])
         destinations = list(task.get("destinations", []))
@@ -598,20 +640,20 @@ async def handle_task_update(message: Message, db: Database, name: str, payload:
             {"_id": task_id}, {"$set": {"destinations": destinations, "updated_at": utcnow()}}
         )
         await add_runtime_destination(db, destinations[index])
-        await message.answer("Destination updated.")
+        await message.answer("✅ Destination updated.")
     elif name == "task_storage":
         value, _, _ = parse_channel_like_input(message, require_numeric=False)
         await db.col("tasks").update_one(
             {"_id": task_id}, {"$set": {"storage_channel": value, "updated_at": utcnow()}}
         )
-        await message.answer("Storage channel saved.")
+        await message.answer("✅ Storage channel saved.")
     elif name == "task_interval":
         seconds = parse_duration_seconds(message.text or "")
         await db.col("tasks").update_one(
             {"_id": task_id},
             {"$set": {"interval_seconds": seconds, "next_run_at": utcnow() + timedelta(seconds=seconds), "updated_at": utcnow()}},
         )
-        await message.answer("Interval updated.")
+        await message.answer("✅ Interval updated.")
     elif name == "task_amount":
         amount = int((message.text or "").strip())
         if amount < 1 or amount > 100:
@@ -619,7 +661,7 @@ async def handle_task_update(message: Message, db: Database, name: str, payload:
         await db.col("tasks").update_one(
             {"_id": task_id}, {"$set": {"posts_per_interval": amount, "updated_at": utcnow()}}
         )
-        await message.answer("Videos per interval updated.")
+        await message.answer("✅ Batch size updated.")
     await show_task_details_view(message, db, task_id)
 
 
@@ -636,7 +678,7 @@ async def handle_access_update(message: Message, db: Database, name: str) -> Non
         if limit < 1 or limit > 100000:
             raise ValueError("limit must be between 1 and 100000")
         await db.set_runtime_path("access.free_daily_limit", limit)
-        await message.answer("Free daily limit updated.", reply_markup=keyboards.home_back_keyboard())
+        await message.answer("✅ Free daily limit updated.", reply_markup=keyboards.home_back_keyboard())
     elif name == "access_premium":
         numbers = [int(part) for part in re.split(r"[\s,|]+", raw) if part]
         if len(numbers) != 2:
@@ -657,11 +699,11 @@ async def handle_access_update(message: Message, db: Database, name: str) -> Non
             },
             upsert=True,
         )
-        await message.answer("Premium granted.", reply_markup=keyboards.home_back_keyboard())
+        await message.answer("✅ Premium access granted.", reply_markup=keyboards.home_back_keyboard())
     elif name == "access_refchan":
         channel_id = int(fix_channel_id(raw))
         await db.set_runtime_path("referral.channel_id", channel_id)
-        await message.answer("Referral channel updated.", reply_markup=keyboards.home_back_keyboard())
+        await message.answer("✅ Referral channel updated.", reply_markup=keyboards.home_back_keyboard())
     elif name == "access_refrule":
         numbers = [int(part) for part in re.split(r"[\s,|]+", raw) if part]
         if len(numbers) != 3:
@@ -669,7 +711,7 @@ async def handle_access_update(message: Message, db: Database, name: str) -> Non
         await db.set_runtime_path("referral.required_joins", numbers[0])
         await db.set_runtime_path("referral.reward_limit", numbers[1])
         await db.set_runtime_path("referral.reward_days", numbers[2])
-        await message.answer("Referral rule updated.", reply_markup=keyboards.home_back_keyboard())
+        await message.answer("✅ Referral rules updated.", reply_markup=keyboards.home_back_keyboard())
 
 
 async def handle_autodel_time(message: Message, db: Database, payload: dict[str, Any]) -> None:
@@ -678,7 +720,7 @@ async def handle_autodel_time(message: Message, db: Database, payload: dict[str,
         raise ValueError("invalid target")
     seconds = parse_duration_seconds(message.text or "")
     await db.set_runtime_path(f"auto_delete.{target}_seconds", seconds)
-    await message.answer("Auto-delete time updated.", reply_markup=keyboards.home_back_keyboard())
+    await message.answer("✅ Auto-delete delay updated.", reply_markup=keyboards.home_back_keyboard())
 
 
 async def handle_broadcast(message: Message, db: Database, bot: Bot) -> None:
@@ -693,7 +735,14 @@ async def handle_broadcast(message: Message, db: Database, bot: Bot) -> None:
         "updated_at": utcnow(),
     }
     result = await db.col("broadcasts").insert_one(broadcast)
-    status_message = await message.answer("Broadcast started.\nSent: 0\nFailed: 0")
+    status_message = await message.answer(
+        "📣 <b>Broadcast Started</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        f"• Audience: <code>{broadcast['total']}</code>\n"
+        "• Sent: <code>0</code>\n"
+        "• Failed: <code>0</code>\n"
+        "• Remaining: calculating…"
+    )
     asyncio.create_task(run_broadcast(db, bot, result.inserted_id, message.chat.id, message.message_id, status_message.chat.id, status_message.message_id))
 
 
@@ -749,16 +798,18 @@ async def update_broadcast_progress(
         {"$set": {"sent": sent, "failed": failed, "status": status, "updated_at": utcnow()}},
     )
     try:
+        title = "✅ Broadcast Complete" if done else "📣 Broadcast Running"
         await bot.edit_message_text(
             chat_id=chat_id,
             message_id=message_id,
             text=(
-                f"Broadcast {status}.\n"
-                f"Total users: {total}\n"
-                f"Processed: {processed}\n"
-                f"Sent: {sent}\n"
-                f"Failed: {failed}\n"
-                f"Remaining: {remaining}"
+                f"{title}\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                f"• Total users: <code>{total}</code>\n"
+                f"• Processed: <code>{processed}</code>\n"
+                f"• Sent: <code>{sent}</code>\n"
+                f"• Failed: <code>{failed}</code>\n"
+                f"• Remaining: <code>{remaining}</code>"
             ),
         )
     except Exception:
@@ -850,7 +901,7 @@ async def run_manual_with_progress_edit(
             return
         last_text = text_msg
         
-        back_markup = keyboards.mk([[keyboards.btn("◀️ Back to Task Details", keyboards.cb("task", "open", task_id))]])
+        back_markup = keyboards.mk([[keyboards.btn("⬅️ Task Details", keyboards.cb("task", "open", task_id))]])
         try:
             await message.edit_text(text_msg, reply_markup=back_markup)
         except Exception:
@@ -860,9 +911,12 @@ async def run_manual_with_progress_edit(
         await scheduler.run_task_manual(task_id, progress_callback)
     except Exception as exc:
         logger.exception("Manual run failed for task %s", task_id)
-        back_markup = keyboards.mk([[keyboards.btn("◀️ Back to Task Details", keyboards.cb("task", "open", task_id))]])
+        back_markup = keyboards.mk([[keyboards.btn("⬅️ Task Details", keyboards.cb("task", "open", task_id))]])
         try:
-            await message.edit_text(f"❌ Manual Run Failed:\n{exc}", reply_markup=back_markup)
+            await message.edit_text(
+                f"❌ <b>Manual Run Failed</b>\n<code>{escape(str(exc), quote=False)}</code>",
+                reply_markup=back_markup,
+            )
         except Exception:
             pass
 
@@ -1054,7 +1108,7 @@ async def diskwala_callbacks(query: CallbackQuery, db: Database, settings: Setti
         runtime = await db.get_runtime_settings()
         enabled = not bool(runtime.get("diskwala", {}).get("enabled"))
         await db.set_runtime_path("diskwala.enabled", enabled)
-        await query.answer("Diskwala toggle updated")
+        await query.answer("Diskwala updated.")
         runtime = await db.get_runtime_settings()
         await safe_edit(query, text.diskwala_settings(runtime), keyboards.diskwala_keyboard(runtime))
         return
@@ -1062,13 +1116,21 @@ async def diskwala_callbacks(query: CallbackQuery, db: Database, settings: Setti
     if action == "setkey":
         await query.answer()
         await AdminStateStore(db).set(query.from_user.id, "disk_setkey")
-        await query.message.answer("🔑 <b>Send your Diskwala API Key:</b>\n\n<i>Send /cancel to stop.</i>")
+        await query.message.answer(
+            "🔑 <b>Diskwala API Key</b>\n"
+            "Send the API key. It will be saved in runtime settings and hidden on the dashboard.\n\n"
+            "<i>Send /cancel anytime to stop.</i>"
+        )
         return
 
     if action == "setbot":
         await query.answer()
         await AdminStateStore(db).set(query.from_user.id, "disk_setbot")
-        await query.message.answer("🤖 <b>Send the Uploader Bot username:</b>\n(Without @, e.g., <i>DiskWalaFileUploaderBot</i>)\n\n<i>Send /cancel to stop.</i>")
+        await query.message.answer(
+            "🤖 <b>Uploader Bot</b>\n"
+            "Send the bot username without @. Example: <i>DiskWalaFileUploaderBot</i>\n\n"
+            "<i>Send /cancel anytime to stop.</i>"
+        )
         return
 
     if action == "backfill":
@@ -1085,7 +1147,7 @@ async def handle_disk_update(message: Message, db: Database, settings: Settings,
     raw = (message.text or "").strip()
     if name == "disk_setkey":
         await db.set_runtime_path("diskwala.api_key", raw)
-        await message.answer("Diskwala API Key updated.", reply_markup=keyboards.home_back_keyboard())
+        await message.answer("✅ Diskwala API key updated.", reply_markup=keyboards.home_back_keyboard())
         
         # Try to send /api <key> to the uploader bot
         runtime = await db.get_runtime_settings()
@@ -1094,11 +1156,11 @@ async def handle_disk_update(message: Message, db: Database, settings: Settings,
             userbot = UserbotService(db, settings)
             if userbot.client:
                 await userbot.client.send_message(bot_username, f"/api {raw}")
-                await message.answer(f"Sent API key to @{bot_username} via userbot.")
+                await message.answer(f"✅ Sent API key to @{escape(bot_username, quote=False)} via userbot.")
         except Exception as e:
             logger.warning("Failed to auto-send API key to uploader bot: %s", e)
             
     elif name == "disk_setbot":
         bot_username = raw.lstrip("@")
         await db.set_runtime_path("diskwala.bot_username", bot_username)
-        await message.answer("Diskwala Uploader Bot updated.", reply_markup=keyboards.home_back_keyboard())
+        await message.answer("✅ Diskwala uploader bot updated.", reply_markup=keyboards.home_back_keyboard())

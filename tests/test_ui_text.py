@@ -6,8 +6,8 @@ from app.ui.text import user_home, task_detail
 class UiTextTests(unittest.TestCase):
     def test_user_home_has_fallback_without_destinations(self):
         body = user_home([])
-        self.assertIn("Welcome", body)
-        self.assertIn("No destination channels", body)
+        self.assertIn("Premium Hub", body)
+        self.assertIn("No public destination channels", body)
 
     def test_task_detail_renders_pending_and_last_posted(self):
         task = {

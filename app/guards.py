@@ -12,7 +12,7 @@ def is_admin_id(user_id: int | None, settings: Settings) -> bool:
 async def reject_message_if_not_admin(message: Message, settings: Settings) -> bool:
     if is_admin_id(message.from_user.id if message.from_user else None, settings):
         return False
-    await message.answer("Admin access only.")
+    await message.answer("🔒 <b>Admin Area</b>\nYou do not have access to this panel.")
     return True
 
 

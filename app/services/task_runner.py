@@ -4,6 +4,7 @@ import asyncio
 import logging
 import secrets
 from datetime import timedelta
+from html import escape
 from typing import Any, Callable, Awaitable
 from bson import ObjectId
 
@@ -273,16 +274,16 @@ class TaskScheduler:
 
     async def run_task_manual(self, task_id: str, progress_callback: Callable[[str], Awaitable[None]]) -> None:
         if task_id in self._running_collect_task_ids or task_id in self._running_post_task_ids:
-            await progress_callback("⚠️ Manual Run: This task is already running in the background. Please wait.")
+            await progress_callback("⏳ <b>Manual Run</b>\nThis task is already running in the background. Please wait.")
             return
 
         self._running_collect_task_ids.add(task_id)
         self._running_post_task_ids.add(task_id)
         try:
-            await progress_callback("🔄 Manual Run: Fetching task details...")
+            await progress_callback("🔄 <b>Manual Run</b>\nPreparing task details…")
             task = await self.db.col("tasks").find_one({"_id": ObjectId(task_id)})
             if not task:
-                await progress_callback("❌ Manual Run: Task not found.")
+                await progress_callback("❌ <b>Manual Run Failed</b>\nTask not found.")
                 return
 
             storage_channel = fix_channel_id(task.get("storage_channel"))
@@ -290,7 +291,7 @@ class TaskScheduler:
             sources = [s for s in task.get("sources", []) if s.get("status", "active") == "active"]
 
             if not storage_channel:
-                await progress_callback("❌ Manual Run: Task needs a storage channel.")
+                await progress_callback("❌ <b>Manual Run Blocked</b>\nSet a storage channel before running this task.")
                 return
 
             saved = 0
@@ -298,18 +299,23 @@ class TaskScheduler:
             updated_sources = list(task.get("sources", []))
             client = None
             if sources or destinations:
-                await progress_callback("🔄 Manual Run: Connecting to userbot...")
+                await progress_callback("🔄 <b>Manual Run</b>\nConnecting to the userbot…")
                 client = await self.userbot.client()
                 if not client:
                     source_error = "Userbot is not logged in or not configured"
-                    await progress_callback("⚠️ Manual Run: Userbot not ready.")
+                    await progress_callback("⚠️ <b>Userbot Not Ready</b>\nLogin the userbot before scanning sources or posting stored media.")
 
             if sources and client:
-                await progress_callback(f"🔄 Manual Run: Scanning {len(sources)} sources...")
+                await progress_callback(f"🔎 <b>Manual Run</b>\nScanning <code>{len(sources)}</code> active sources…")
                 for idx, source in enumerate(updated_sources):
                     if source.get("status", "active") != "active":
                         continue
-                    await progress_callback(f"🔄 Manual Run: Scanning source {idx+1}/{len(sources)} ({source.get('title') or source.get('value')})...")
+                    source_label = escape(str(source.get("title") or source.get("value") or "source"), quote=False)
+                    await progress_callback(
+                        f"🔎 <b>Manual Run</b>\n"
+                        f"Scanning source <code>{idx + 1}/{len(sources)}</code>\n"
+                        f"<i>{source_label}</i>"
+                    )
                     try:
                         count = await self._collect_from_source(
                             client=client,
@@ -333,7 +339,10 @@ class TaskScheduler:
             posting_error = None
             if destinations:
                 posts_per_interval = int(task.get("posts_per_interval") or 1)
-                await progress_callback(f"🔄 Manual Run: Posting up to {posts_per_interval} videos to {len(destinations)} destinations...")
+                await progress_callback(
+                    f"📤 <b>Manual Run</b>\n"
+                    f"Posting up to <code>{posts_per_interval}</code> videos to <code>{len(destinations)}</code> destinations…"
+                )
                 try:
                     posted, post_errors = await self.post_stored_to_destinations(
                         task,
@@ -348,7 +357,7 @@ class TaskScheduler:
                     logger.exception("Manual post failed")
                     posting_error = str(exc)
             else:
-                await progress_callback("⚠️ Manual Run: No active destinations configured.")
+                await progress_callback("⚠️ <b>No Active Destinations</b>\nAdd or resume a destination channel before posting.")
 
             last_error = posting_error or source_error
             update_doc = {
@@ -362,16 +371,18 @@ class TaskScheduler:
 
             if last_error:
                 await progress_callback(
-                    f"⚠️ Manual Run Finished with issues.\n\n"
-                    f"- Saved to storage: {saved} videos\n"
-                    f"- Posted to destinations: {posted} videos\n"
-                    f"- Error: {last_error}"
+                    f"⚠️ <b>Manual Run Finished With Issues</b>\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n"
+                    f"• Saved to storage: <code>{saved}</code>\n"
+                    f"• Posted to destinations: <code>{posted}</code>\n"
+                    f"• Issue: <code>{escape(str(last_error), quote=False)}</code>"
                 )
             else:
                 await progress_callback(
-                    f"✅ Manual Run Completed Successfully!\n\n"
-                    f"- Saved to storage: {saved} videos\n"
-                    f"- Posted to destinations: {posted} videos"
+                    f"✅ <b>Manual Run Complete</b>\n"
+                    f"━━━━━━━━━━━━━━━━━━━━\n"
+                    f"• Saved to storage: <code>{saved}</code>\n"
+                    f"• Posted to destinations: <code>{posted}</code>"
                 )
         finally:
             self._running_collect_task_ids.discard(task_id)
@@ -690,7 +701,7 @@ class TaskScheduler:
         deep_link = f"https://t.me/{username}?start=get_{media['token']}"
         caption = self.destination_caption(media)
         markup = InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="Get This Video", url=deep_link)]]
+            inline_keyboard=[[InlineKeyboardButton(text="🎬 Get This Video", url=deep_link)]]
         )
         attempted = 0
         posted_chats = {chat_ref(value) for value in (media.get("posted_destination_chat_ids") or [])}
@@ -789,7 +800,13 @@ class TaskScheduler:
         if size:
             mb = float(size) / (1024 * 1024)
             size_text = f"{mb:.2f} MB"
-        return f"Video length: {duration}\nVideo size: {size_text}"
+        return (
+            "🔞 <b>Premium Video Drop</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"• Duration: <code>{duration}</code>\n"
+            f"• Size: <code>{size_text}</code>\n\n"
+            "Tap below to receive the private delivery in your chat."
+        )
 
     async def _schedule_destination_delete(self, runtime: dict[str, Any], chat_id: int | str, message_id: int) -> None:
         settings = runtime.get("auto_delete") or {}
